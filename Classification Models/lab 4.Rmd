@@ -1,0 +1,295 @@
+---
+title: "Lab-4"
+date: "10.7.21"
+output:
+  html_document:
+    theme: lumen
+    toc: yes
+    toc_float:
+      collapsed: yes
+  word_document:
+    toc: yes
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE, echo= FALSE, message= FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# setwd("C:/Users/Mordechai Ben-Yaacov/Desktop/school/year_3/semester b/Statistical learning and data analysis/labs/lab 4")
+#setwd("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab4")
+```
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+library(kableExtra)
+library(gridExtra)
+library(dplyr)
+library(nnet)
+library(knitr)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(htmltools)
+```
+
+
+
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+if (!file.exists("train-images-idx3-ubyte")){
+# modification of https://gist.github.com/brendano/39760
+# automatically obtains data from the web
+# creates two data frames, test and train
+# labels are stored in the y variables of each data frame
+# can easily train many models using formula `y ~ .` syntax
+
+# download data from http://yann.lecun.com/exdb/mnist/
+download.file("http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz",
+              "train-images-idx3-ubyte.gz")
+download.file("http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz",
+              "train-labels-idx1-ubyte.gz")
+download.file("http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz",
+              "t10k-images-idx3-ubyte.gz")
+download.file("http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz",
+              "t10k-labels-idx1-ubyte.gz")
+
+# gunzip the files
+R.utils::gunzip("train-images-idx3-ubyte.gz")
+R.utils::gunzip("train-labels-idx1-ubyte.gz")
+R.utils::gunzip("t10k-images-idx3-ubyte.gz")
+R.utils::gunzip("t10k-labels-idx1-ubyte.gz")
+}
+```
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+# helper function for visualization
+show_digit = function(arr784, col = gray(12:1 / 12), ...) {
+  image(matrix(as.matrix(arr784[-785]), nrow = 28)[, 28:1], col = col, ...)
+}
+
+# load image files
+load_image_file = function(filename) {
+  ret = list()
+  f = file(filename, 'rb')
+  readBin(f, 'integer', n = 1, size = 4, endian = 'big')
+  n    = readBin(f, 'integer', n = 1, size = 4, endian = 'big')
+  nrow = readBin(f, 'integer', n = 1, size = 4, endian = 'big')
+  ncol = readBin(f, 'integer', n = 1, size = 4, endian = 'big')
+  x = readBin(f, 'integer', n = n * nrow * ncol, size = 1, signed = FALSE)
+  close(f)
+  data.frame(matrix(x, ncol = nrow * ncol, byrow = TRUE))
+}
+
+# load label files
+load_label_file = function(filename) {
+  f = file(filename, 'rb')
+  readBin(f, 'integer', n = 1, size = 4, endian = 'big')
+  n = readBin(f, 'integer', n = 1, size = 4, endian = 'big')
+  y = readBin(f, 'integer', n = n, size = 1, signed = FALSE)
+  close(f)
+  y
+}
+
+# load images
+train <- load_image_file("train-images-idx3-ubyte")
+test <- load_image_file("t10k-images-idx3-ubyte")
+
+# load labels
+train$y <- as.factor(load_label_file("train-labels-idx1-ubyte"))
+test$y <- as.factor(load_label_file("t10k-labels-idx1-ubyte"))
+
+#filter 3,8
+my_train <- filter(train, y %in%c(3,8))[c(0:4000),]
+my_test <- filter(test, y %in% c(3,8))
+
+my_train$y <- factor(my_train$y)
+my_test$y <- factor(my_test$y)
+```
+
+## 1. Comparing two classification methods 
+
+In this question we will compare two different methods from different classifier families, to classify hand written numbers 3 and 8.
+
+We choose a *two-class* method to build a tree and a multinomial regression.
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+tree_fun <- rpart(y~., data = my_train, method = 'class',cp = 0.000001)
+printcp(tree_fun)
+tune_tree <- rpart(y~., data = my_train, method = 'class', cp = 0.0026)
+```
+
+
+The convention is to use the best tree (lowest cross-validate relative error) or the smallest (simplest) tree within one standard error of the best tree.
+The best tree is in row 17 (33 splits), but the tree in row 13 (19 splits) does effectively the same job (xerror for tree in row 13 = 0.07232, which is within (smaller than) the xerror of best tree plus one standard error, xstd, (0.11238 + 0.0074374) = 0.1198174) and is simpler, hence we will take a cp of 0.0026.
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+multi_fun <- multinom(data = my_train, y~.)
+
+ytrain <- my_train$y
+ytest <- my_test$y
+
+tree_pred_in <- predict(tune_tree, type = 'class')
+tree_pred_out <- predict(tune_tree,my_test, type = 'class')
+
+multi_pred_in <- predict(multi_fun, type = 'class')
+multi_pred_out <- predict(multi_fun,my_test, type = 'class')
+
+tree_pred_prob <- as.numeric(predict(tune_tree,my_test, type = 'prob')[,1])
+multi_pred_prob <- 1 - as.numeric(predict(multi_fun,my_test, type = 'prob'))
+```
+
+
+## 2. Confusion Matrix
+
+In this question we wrote a function that calculates the confusion matrix. In our function we calculated the precision and the recall (assuming class 3 is positive), for true positives, true negatives, false positives and false negatives.
+
+```{r}
+confusion_matrix <- function(t, l){
+  m <- matrix(0,nrow = 2,ncol = 4)
+  rownames(m) <- c("False(8)", "True(3)")
+  colnames(m) <- c("No(8)", "Yes(3)","No(8)", "Yes(3)")
+  
+  m[1,1] <- t[2,2]
+  m[1,2] <- t[2,1]
+  m[1,3] <- t[2,2] / l
+  m[1,4] <- t[2,1] / l
+
+  m[2,1] <- t[1,2]
+  m[2,2] <- t[1,1]  
+  m[2,3] <- t[1,2] / l
+  m[2,4] <- t[1,1] / l 
+  accuracy_Test <- sum(diag(t)) / sum(t)
+  return(list(matrix = m,accuracy = accuracy_Test))
+}
+```
+
+Next, we ran our function on each model (test and train) to check if we have an over-fitting. 
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+
+confusion_matrix(table(ytrain,tree_pred_in), nrow(my_train))$matrix %>%  kbl(align = 'c', caption = "Confusion Matrix - Tree train") %>%   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%  footnote(general = paste0("The Accuracy is: ",round(confusion_matrix(table(ytrain,tree_pred_in), nrow(my_train))$accuracy,3)),footnote_as_chunk = T)
+
+```
+
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+confusion_matrix(table(ytest,tree_pred_out), nrow(my_test))$matrix %>%  kbl(align = 'c', caption = "Confusion Matrix - Tree Test") %>%   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%  footnote(general = paste0("The Accuracy is: ",(round(confusion_matrix(table(ytest,tree_pred_out), nrow(my_test))$accuracy,3))),           footnote_as_chunk = T)
+
+```
+
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+confusion_matrix(table(ytrain,multi_pred_in), nrow(my_train))$matrix %>%  kbl(align = 'c', caption = "Confusion Matrix - Multinomial Train") %>%   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%  footnote(general = paste0("The Accuracy is: ",(round(confusion_matrix(table(ytrain,multi_pred_in), nrow(my_train))$accuracy,3))),           footnote_as_chunk = T)
+```
+
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+confusion_matrix(table(ytest,multi_pred_out), nrow(my_test))$matrix %>%  kbl(align = 'c', caption = "Confusion Matrix - Multinomial Test") %>%   kable_styling(bootstrap_options = "striped", full_width = F, position = "left") %>%  footnote(general = paste0("The Accuracy is: ",(round(confusion_matrix(table(ytest,multi_pred_out), nrow(my_test))$accuracy,3))),           footnote_as_chunk = T)
+
+```
+
+
+We can see that there is 96% accuracy in the first 3 and 92.7% in the last 1. This shows that the models are very accurate and we probably don't have overfitting so we get a very good accuracy all along - all false values are close to zero and true values are close to there real value.
+
+## 3. ROC
+
+In this question we wrote a function that calculates and plots the ROC curve and the AUC value, AUC is the probability that we get a true positive greater than a true negative.
+
+```{r}
+roc_curve <- function(train,test,probability,breaks = 1000, model_name) {
+  roc <- data.frame(x = 0,y = 0,ct = 0)
+  
+  for (cutoff in seq(0,1, by = 1/breaks)) {
+    index <- which(probability  >= cutoff)
+    x = ifelse(length(index) >= 1, length(which(my_test$y[index] == 8)) / ( length(which(my_test$y == 8))), 0)
+    y = ifelse(length(index) >= 1, length(which(my_test$y[index] == 3)) / ( length(which(my_test$y == 3))), 0)
+    temp = c(x,y,cutoff)
+    roc <- rbind(temp,roc)
+  }
+  
+  roc <- roc[-1,]
+  auc = mean(roc$y>roc$x)
+  p = ggplot(data=roc, aes(x=x, y=y)) + geom_line(colour = "steelblue", size=1)+ geom_abline(intercept = 0, slope = 1, colour = "steelblue", size=1)+
+              ylim(0,1)+ xlim(0,1)+
+              ggtitle(paste("ROC Curve",":",model_name), subtitle = paste('AUS', ': ', as.character(round(auc,5))))+
+              xlab("False positive rate")+ ylab("True positive rate")+theme_bw()
+    
+    return(p)
+  
+}
+```
+
+Now, we use this function to draw the ROCs for both classifers.
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+tree_roc <- roc_curve(my_train,my_test,tree_pred_prob,1000,'Tree Model')
+multi_roc <- roc_curve(my_train,my_test,multi_pred_prob,1000,'Multinomial Model')
+grid.arrange(tree_roc, multi_roc, nrow = 1)
+```
+
+As we can see the in the plots, the ROC curves show satisfying results -the AUC values for both models are close to 1 (approximately 0.998).
+
+In addition, it can be seen that the models show relatively similar results but we can see that the Multinomial model has a slite moderate increase. 
+
+Because of the similarities between the models, it can be assumed that both are very good, and any model chosen from both will be a good predictive model.
+
+## 4. Examples that were classified incorrectly.
+
+In this question we displayed four examples that were classified incorrectly, and tried to interpret what made these examples hard for the classifier.
+
+First, we looked at all the examples that were classified incorrectly and chose four of them.
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+p_t = data.frame(pred = tree_pred_out, true = my_test$y)
+wrong = which(p_t$pred != p_t$true)
+```
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE, results='hide', fig.show='hide'}
+#finding the digit that have a good explanation from the digit that were wrong
+for (i in c(1:length(wrong))) {
+  show_digit(my_test[wrong[i],])
+  title(paste(wrong[i] ))
+}
+```
+
+The first one we chose is:
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE, out.width= '50%'}
+show_digit(my_test[1563,])
+title(paste(1563))
+```
+
+We can see that the image looks like a blob of black with a small circle inside therefore it can be interpreted as a 3 or an 8. The real number is 8, the shape of the black blob does indeed look like an 8 also since there is only 1 circle of white the model could assume its a 3.
+
+The second one is:
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE, out.width= '50%'}
+show_digit(my_test[1198,])
+title(paste(1198))
+```
+
+the real number is 3 and the model assumed it’s an 8. the model was probably wrong because the bottom circle is closed like in an 8 therefore it was mistaken.
+
+The next one is:
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE,out.width= '50%'}
+show_digit(my_test[1176,])
+title(paste(1176))
+```
+
+In this image it is very hard to know what number is the right number even for a human’s eye since on one hand there are 2 circles like an 8 and on the other hand the two circles look a bit open like a 3 therefore it makes since that the model was wrong. after checking the real data, we can see that the number is a 3.
+
+The last one is:
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE, out.width= '50%'}
+show_digit(my_test[1013,])
+title(paste(1013))
+```
+
+The real number here is a 3 also in the image we can see that there is one closed circle and two opened circles and if you look at the bottom of the image it looks like an 8 and if you look at the top it looks like a 3 therefore it makes since the model was wrong here
+
+## 5. Classifiers on specific image
+
+In the training dataset, we trained the model on the Pixel values that are between 0 to 255, when 0 means white and 255 means black.
+What matters to a neural net are the pixel values 0 (background) and 255 (foreground), though you can assign different colors to these pixel values when plotting the images.
+A neural net trained on images with 0 as background and 255 as foreground will not be able to recognize images with inverted colors. we would need to train a neural net on both types of images if we want it to work on both.
