@@ -1,0 +1,386 @@
+---
+title: "Lab 2 - Q.1-Q.2"
+date: "30.4.2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, echo= FALSE, message= FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+# importing libraries
+library(tidyverse)
+library(ggrepel)
+library(grid)
+library(reshape2)
+library(gridExtra)
+library(pracma)
+library(MASS)
+library(dendextend)
+library(readr)
+library(readxl)
+library(gtools)
+```
+
+## Q.1: Simulation Study
+In this question we will generate 3 groups of vectors from multivariate Gaussian distribution and identify the correct group of each vector using K-Means method.
+
+#### 1. 
+
+first, we will generate 10 coordinates of each mj vector j= 1,...,3 with mu = 0 and sd = 1.
+in `rnorm` function it's the default.
+
+```{r, message= FALSE, echo = FALSE}
+set.seed(42)
+
+x <- c(rnorm(10))
+y <- c(rnorm(10))
+z <- c(rnorm(10))
+```
+
+#### 2.
+
+Next, we build function that outputs a simulated dataset of dimension 100 x P with those 3 vector we created.
+
+```{r, message= FALSE, , echo = FALSE}
+set.seed(42)
+sim_data <- function(mu1,mu2,mu3, p,sigma) {
+  sigma_i <- sigma * diag(p)
+  mu1 <- c(mu1,rep(0,p-10)) ; mu1 <- mvrnorm(20,mu1,sigma_i)
+  mu2 <- c(mu2,rep(0,p-10)) ; mu2 <- mvrnorm(30,mu2,sigma_i)    
+  mu3 <- c(mu3,rep(0,p-10)) ; mu3 <- mvrnorm(50,mu3,sigma_i)
+  
+  pai <- rbind(mu1,mu2,mu3)
+  return(pai)
+}
+```
+
+
+#### 3. 
+
+Now we need to choose 4 $\sigma^2$ level. We chose : 1,10, 150, 1200 and we will use the next p: 10, 20, 50.
+
+```{r, message= FALSE, echo = FALSE}
+sig.level = c(1,10,150,1200)
+p.level = c(10,20,50)
+
+```
+
+#### 4-6
+
+We will generate B=50 datasets for each combination of chosen variance $\sigma^2$ and size (p columns) and calculate the Kmeans (K=3).
+
+For each iteration we saved the mean and the sd of the accuracy for the Kmeans, in addition to that, we saved the running time for each computation to check later if there is a pattern.
+```{r, message= FALSE, echo= FALSE}
+set.seed(42)
+# define B multiple datasets
+B = 50
+
+# creating data frames for the results
+accur_mean = data.frame(matrix(NA, nrow = length(sig.level), ncol = length(p.level)), row.names = sig.level)
+
+accur_sd = data.frame(matrix(NA, nrow = length(sig.level), ncol = length(p.level)), row.names = sig.level)
+colnames(accur_mean) <- colnames(accur_sd)  <- p.level
+
+running.results = data.frame(sigma_2 = NA, p= NA, running.val= NA)
+
+# tables for the accuracy checking
+clusters = c(rep(1,20),rep(2,30), rep(3,50))
+mat_perm =permutations(n=3,r=3,v=c(1,2,3), repeats.allowed = F)
+
+#run.col = 0
+for (sig.ind in 1:length(sig.level)) {
+  sig = sig.level[sig.ind]
+  for (p.ind in 1:length(p.level)) {
+    p = p.level[p.ind]
+    accuracy.results = c()
+    tmp.running = data.frame(sigma_2 = rep(sig,50), p= rep(p,50), running.val= NA)
+    for (i in 1:B){
+      
+      # apply the function
+      df <- sim_data(x,y,z,p,sig) 
+      s_t <- Sys.time() # start time
+      means_model <- kmeans(x = df ,centers = 3) # kmeans 3 of p dimentions
+      e_t <- Sys.time() # end time
+      
+      # calculating run-time
+      total_t <- e_t-s_t # total time
+      tmp.running$running.val[i] = as.numeric(total_t)
+
+      # checking the accuracy
+      cluster_kmeans = means_model$cluster
+      acc_check = as.data.frame(unclass(table(clusters,cluster_kmeans)))
+      
+      max_value = -Inf
+      
+      # checking each permutation of spliting to groups to find the main diagonal
+      for(perm in 1:nrow(mat_perm)){
+        diag_sum = acc_check[1,mat_perm[perm,1]] + acc_check[2,mat_perm[perm,2]] + acc_check[3,mat_perm[perm,3]]
+        max_value = max(diag_sum,max_value)
+      }
+      accuracy.results = c(accuracy.results, max_value/100)
+    }
+    running.results = rbind(running.results,tmp.running)
+    accur_mean[sig.ind,p.ind] = mean(accuracy.results)
+    accur_sd[sig.ind,p.ind] = (sd(accuracy.results)/sqrt(B))
+  }
+}
+running.results = running.results[-1,]
+```
+
+The results we obtained regarding the mean and standard deviation of the level of accuracy are:
+
+Mean:
+```{r, message= FALSE, echo= FALSE}
+accur_mean
+```
+SD:
+```{r, message= FALSE, echo= FALSE}
+accur_sd
+```
+
+Next we will show these results in a plot. We chose grouped bar plot because we think it can best be seen as the effect of a change in $\sigma^2$ and a change in p-dimension on the level of accuracy.
+In addition, the standard deviation can be conveniently combined to this plot and much can be learned from it.
+
+```{r, message=FALSE, echo=FALSE}
+
+# creating a melted data frame for using in the plot.
+accur_plot = melt(accur_mean)
+accur_sd_plot = melt(accur_sd)
+accur_plot = cbind(sigma_2 = rep(sig.level,3), p = rep(p.level,4), accuracy_mean = accur_plot$value, accuracy_sd = accur_sd_plot$value)
+accur_plot = as.data.frame(accur_plot)
+
+# Grouped
+ggplot(accur_plot, aes(fill=as.factor(sigma_2), y=accuracy_mean, x=as.factor(p)))+
+  geom_bar(position="dodge", stat="identity") + 
+  geom_errorbar(aes(ymin=accuracy_mean - accuracy_sd, ymax =accuracy_mean + accuracy_sd),
+                 width=0.4, position=position_dodge(.9),colour="black", alpha=1) +
+  theme_bw()+ 
+  labs(title = "Comparison accuracy score of Kmeans", 
+       subtitle = "by P dimention and sigma^2", x = "P", y = "Accuracy mean", fill = "sigma^2")+
+geom_text(aes(y=accuracy_mean + accuracy_sd, label=round(accuracy_sd,3)), position = position_dodge2(width=1), vjust = -.3, size = 3) +
+  theme(plot.title = element_text(color="black", size=15, face="bold",hjust=0.5),
+                  plot.subtitle = element_text(color = "black", size = 10, face = "bold", hjust = 0.5))
+  
+
+```
+
+
+Looking at each P separately one can examine the effect of the $\sigma^2$ (the variance) on accuracy (each group of columns in P), and as can be seen the more the $\sigma^2$ is increased the lower the level of accuracy. 
+
+Also, the decrease is a kind of exponential because the large decreases in the level of accuracy are actually made in the lower levels of $\sigma^2$ (when moving from 1 to 10), but when Sigma is already very large the decrease in accuracy is not significant - as can be seen in the big jump from $\sigma^2$ equal to 150 $\sigma^2$ Which is worth 1200 where there is a minor decrease.
+
+In contrast, when looking at the differences between the different dimensions (P-level), it can be seen that the P size does not have a strong effect on the level of accuracy. And in all the P levels the column groups are relatively similar and the trend is the same.
+
+So, we can say that the variance of the data has a stronger effect on the accuracy than the level of the dimension-P.
+
+#### 7.
+
+Now we decided to do the same plot for the run-time.
+In calculating the run times for each B and each combination, we arrived at a relatively large data, and since we also looked at the average level of accuracy in each combination, it seemed right to weight the observations to the average here as well.
+Mainly also because we were unable to see a significant difference in the run-time within the different data sets within each combination.
+
+```{r, message=FALSE, echo=FALSE}
+running.results.mean = running.results %>% 
+  group_by(sigma_2,p) %>% 
+  summarize(mean_run = mean(running.val, na.rm = TRUE), sd_run = sd(running.val, na.rm = TRUE))
+
+# plot for running time
+ggplot(running.results.mean, aes(fill=as.factor(sigma_2), y=mean_run, x=as.factor(p)))+
+  geom_bar(position="dodge", stat="identity") + 
+  theme_bw()+ 
+  labs(title = "Comparison the Run-Time of Kmeans",subtitle = "by P dimention and sigma^2", x = "P", y = "run time mean", fill = "sigma^2")+
+  theme(plot.title = element_text(color="black", size=15, face="bold",hjust=0.5),
+                  plot.subtitle = element_text(color = "black", size = 10, face = "bold", hjust = 0.5))
+  
+```
+
+The run times plot shows a different trend compared to the accuracy level plot. This time, both variance ($\sigma^2$) and the data dimension (p) have an impact.
+
+It can be seen by looking at the P groups that when P increases then the running times become larger. Moreover, looking at the effect of variance - it can be seen that the more you increase the sigma, the longer the run time.
+
+In addition, there is a certain relationship between P and $\sigma^2$ - so that as P increases, so does the difference in the level of accuracy at the different levels of $\sigma^2$.
+It can be seen that when P is low (10) then increasing the sigma increases the running time, but less than when P is equal to 20 or 50.
+That is, as P increases, increasing variance increases the running time the most.
+
+## Q.2: Comparing demographic and election data
+
+In this question we are going to analyze election voting data and dmographics. To do so we use some data from the ISB.
+
+First, we load the elections data and the demographic data.
+
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+# Adjusting the data to Israel
+invisible(Sys.setlocale(category = "LC_ALL", locale = "Hebrew"))
+
+# reading the elections and demographic files
+elections_data <- read_csv("knesset_24.csv",
+                      locale = locale(date_names = "he", encoding = "UTF-8"))
+
+demog_data <- read.table("cbs_demographics.txt",
+                         fill=TRUE, header=TRUE, sep="\t")
+
+```
+#### 1.
+
+We need to merge the dataframes, but we don't have a common column. Therefore, we found another file on the ISB website that includes the locality number in addition to its name.
+
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+village_code <- read_excel("bycode2019.xlsx")
+village_code <- village_code %>% 
+  rename(village = `תעתיק`) 
+village_code = village_code[,1:3]
+
+# merging it to the demographic data
+demog_data  = merge(demog_data, village_code, by = 'village') 
+```
+
+We randomly choose a set of 20 cities described in the ISB data sets and find them in the elections data.
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+set.seed(123137)
+samp_demographic <- demog_data[sample(nrow(demog_data), 20),]
+samp_elections <- elections_data %>% filter(`סמל ישוב` %in% samp_demographic$`סמל יישוב`)
+
+# summarizing the votes in each city
+sum_votes <- samp_elections$`כשרים`
+```
+
+#### 2. 
+
+In order to construct a meaningful distance matrix, first we will clean the data so that it contains only the votes and also normalize it to percentages.
+So that each entry will be the percentage of votes for the party out of the total votes in the city.
+
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+# calculating votes percantage by dividing each party in the "כשרים" votes of each city
+
+tree_elections = samp_elections[,-c(1:7)]
+for (row in 1:nrow(tree_elections)){
+  tree_elections[row,] = tree_elections[row,] / sum_votes[row]
+}
+row.names(tree_elections) = samp_elections$`שם ישוב`
+```
+
+Next, we will calculate our distance matrix by Euclidean distances.
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+dist_matrix_elec = dist(tree_elections)
+```
+
+Now, we want to apply hierarcial clustering by the agglomerative clustering. In this model we treat each city as a separate cluster and then each time unite the two cities closest to each other into one cluster according to the calculation of the distance we will define.
+The method we chose to calculate the distance is complete-linkage clustering, and in our case these are the two cities between which there is the highest connection.
+
+```{r, warning=FALSE, , warning=FALSE, message=FALSE, echo= FALSE}
+# apply the complete clustering
+complete_clust_elec = hclust(dist_matrix_elec, method = "complete")
+
+# plotting the dendogram
+plot(complete_clust_elec, cex = 0.8, hang = -1, main = "Elections Data")
+```
+
+#### 3. 
+
+As can be seen in the data, each variable is on a different scale so and in addition should refer to the size of the city.
+Therefore, we thought that a good way to scale the data is to subtract the average in each column and divide by the standard deviation.
+
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+#  Scaling the demographic data
+tree_demographic = samp_demographic[,c(2:16)]
+tree_demographic = as.data.frame(scale(tree_demographic))
+row.names(tree_demographic) = samp_demographic$`שם יישוב`
+```
+
+We chose again the default method of calculating distance- euclidean, and the complete-linkage clustering.
+In our opinion, since both data deal with cities and since it is reasonable to assume that might be some connection between the nature of the vote and the socio-economic situation in that city, then we assumed that it would be correct to choose the same hierarchical method.
+By choosing the same method, we attach importance to the connection that can be formed from the same variables (voting and demographics) and do not rule out its existence.
+
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+# apply the complete clustering
+dist_matrix_demog = dist(tree_demographic)
+complete_clust_demog = hclust(dist_matrix_demog, method = "complete")
+
+# plotting the dendogram
+plot(complete_clust_demog, cex = 0.8, hang = -1, main = "Demographic data")
+```
+
+#### 4.
+
+As can be seen, the two dendograms are relatively different.
+First, the height scale ranges between different values, with the election dendogram ranging from (0,1) while the demographic dendogram ranging from (0,12).
+
+Also, with reference to the cities included in each cluster one can see an important difference related to the data we were dealing with.
+For example, in the election data, it can be seen that in the splits that were made, a division of clusters of Arabs and a cluster of Jews and Druze was obtained. In addition, another cluster split from the Jews that included only ultra-Orthodox, and another cluster that included national religious and so on.
+In other words, it can be seen that the dendrogram was divided according to the political map of Israel and according to the voting patterns typical of these cities.
+In contrast, the stages of division The demographic dendrogram united cities that do not have the same voting patterns on a religious background (Arabs and ultra-Orthodox for example) but do have the same social characteristics such as income, number of children, etc.
+
+The one similarity we can see is at the labels- there are quite a lot of cities eventually at the bottom of the dendogram being paired together, probably because the similarities between socio-economic status and political belongings.
+
+#### 5.
+
+We chose to use Baker’s Gamma Index because we found that this index does not take into account the difference in height between the dendograms. It is defined as the rank correlation between the stages at which pairs of objects combine in each of the two trees . Therefore, we hypothesized that it would be a good measure of the test required.
+
+We have notices that for this index we must use the same city labels, so first we will adjust the labels
+```{r, warning=FALSE, message=FALSE, echo= FALSE, results=FALSE}
+samp_demographic$`שם יישוב`
+```
+
+```{r, warning=FALSE, message=FALSE, echo= FALSE, results=FALSE}
+samp_elections$`שם ישוב`
+```
+
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+#change the relevant city name
+row.names(tree_demographic)[rownames(tree_demographic) == "קריית עקרון"] <- "קרית עקרון"
+row.names(tree_demographic)[rownames(tree_demographic) == "הרצלייה"] <- "הרצליה"
+row.names(tree_demographic)[rownames(tree_demographic) == "יהוד"]<- "יהודמונוסון"
+
+# it is working although it seems to be the wrong syntax, because of the Hebrew
+
+## calculating again the distance with the new label
+dist_matrix_demog = dist(tree_demographic)
+complete_clust_demog = hclust(dist_matrix_demog, method = "complete")
+```
+
+Now we can calculate the Baker’s Gamma score:
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+my_score = cor_bakers_gamma(complete_clust_demog, complete_clust_elec)
+my_score
+```
+
+As you can see, the result is lower than 0.5 so the two dendograms are more different than similar as we presented in the comparison we made earlier.
+
+#### 6. 
+
+We will randomize 10,000 permutations of labels in dendograms, by keeping the labels of the election dendrogram fixed to find a background distribution for this score.
+
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+set.seed(123137)
+R <- 10000
+Baker_dist = numeric(R) 
+dend_mixed <- complete_clust_elec %>% as.dendrogram
+for(i in 1:R) {
+   dend_mixed <- sample.dendrogram(dend_mixed, replace = FALSE)
+   Baker_dist[i] <- cor_bakers_gamma(complete_clust_elec, dend_mixed)
+}
+```
+
+Next, we will plot a histogram to show the distribution, with a vertical at our score.
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+Baker_dist = as.data.frame(Baker_dist)
+
+hist(x=Baker_dist$Baker_dist, main = "Baker's gamma distribution under H0", xlim = c(-0.4,1))
+abline(v = my_score, lty = 2, col = 4)
+legend("topleft", legend = c("our score"), fill = c(4))
+```
+
+As we can see , according to 10,000 random permutations, our real score is almost unreachable and better than most the permutations.
+
+Our null hypothesis is if the score in the distribution is higher than our score from previous question (one sided).
+The P-value for this null is:
+```{r, warning=FALSE, message=FALSE, echo= FALSE}
+pval = round(sum(my_score<Baker_dist)/R,4)
+pval
+```
+
+We got a close to zero p_value (0.0014), much smaller than 0.05 so we reject the null hypothesis.
