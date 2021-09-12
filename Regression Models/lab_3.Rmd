@@ -1,0 +1,687 @@
+---
+title: "Lab-3"
+author:
+date: "15.6.21"
+output:
+  html_document:
+    theme: lumen
+    toc: yes
+    toc_float:
+      collapsed: yes
+  word_document:
+    toc: yes
+  pdf_document: default
+---
+```{r setup, include=FALSE, echo= FALSE, message= FALSE}
+knitr::opts_chunk$set(echo = FALSE, message= FALSE, error = FALSE, warning = FALSE)
+```
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+library(tidyverse)
+library(ggrepel)
+library(ggpubr)
+library(tidyverse)
+library(rsample) 
+library(caret)
+library(glmnet)
+library(kableExtra)
+```
+
+## Q.1:
+
+In this question we will sample training data sets and implement our own kernel regression and quadratic regression (with ols).
+We will estimate the following quantities with a range of differnt bandwidths: expected optimism, cross-validation error, in-sample expected error and out-of-sample expected prediction error.
+We will compare our results and explain the differences
+
+```{r, message= FALSE, echo= FALSE}
+#creating functions so that we can estimate the quantities
+#1.
+my_sample = function(x = NA, n = NA,lambda){
+  #if there is no n value
+  if (is.na(n) == TRUE){
+    n = length(x)
+  }
+  
+  epsilon = rnorm(n, 0, 0.3)
+  
+  #if there is no x vector
+  if (is.na(x) == TRUE){
+    x = runif(n, -2, 2)
+    y = sin(lambda*x) + 0.3*x^2 + ((x-0.4)/ 3)^3 + epsilon
+  } else{
+      y = sin(lambda*x) + 0.3*x^2 + ((x-0.4)/ 3)^3 + epsilon
+    }
+  return(as.data.frame(cbind(x, y)))
+}
+
+
+#2.
+my_kernel <- function(training,h,x) {
+  pred_kernel <- NULL
+  w  <-  matrix(NA, nrow = length(training$y), ncol = length(training$y))
+  j <-  1
+  for (i in x) {
+    t = i - training$x
+    k <- (1/((sqrt(2*pi))))*exp(-0.5 *(t/h)^2)
+    k_sum <- sum(k)
+    weight <- k/k_sum
+    y_k <- sum(weight*training$y)
+    pred <- c(i,y_k)
+    pred_kernel <- rbind(pred_kernel,pred)
+    w[,j] <- weight
+    j <-  j + 1
+  }
+  pred_kernel <- data.frame(x = pred_kernel[,1], y = pred_kernel[,2])
+  return(list(prediction = pred_kernel,weights = w))
+}
+
+#3.
+eop <- function(w,n,var_ep) {
+  sigma <- var_ep ^ 0.5
+  return(2/n*sigma*sum(diag(w)))
+}
+
+eop_q <- function(x,n,var_ep) {
+  w = x %*% solve(t(x) %*% x) %*% t(x)
+  sigma <- var_ep ^ 0.5
+  return(2/n*sigma*sum(diag(w)))
+}
+
+# We will implement fold cross validation: 
+#1) Randomly shuffle the data
+#2) Create n equally size folds
+#3)Perform 10 fold cross validation
+
+fold_cross_val <- function(data,n){
+data <- data[sample(nrow(data)),]
+folds <- cut(seq(1,nrow(data)),breaks=n,labels=FALSE)
+for(i in 1:n){
+    indexes <- which(folds == i,arr.ind = TRUE)
+    test <- data[indexes, ]
+    train <- data[-indexes, ]
+  }
+  return(list(test = test, train = train))
+}
+
+cross_val_error <-  function(training,h,n){
+  errors <-  rep(NA,n)
+  for(i in 1:n){
+#    set.seed(i)
+    cross_v <- fold_cross_val(training,n)
+    k <-  my_kernel(training = cross_v$train, x = cross_v$test$x ,h = h)
+    y_real <- cross_v$test$y
+    y_hat <- k$prediction$y
+    
+    error_est <-  mean((y_real-y_hat)**2)
+    errors[i] <-  error_est
+
+  }
+  return(mean(errors))
+}
+
+cross_val_error_q <-  function(training,regression,n){
+  errors <-  rep(NA,n)
+  for(i in 1:n){
+#    set.seed(i)
+    cross_v <- fold_cross_val(training,n)
+    y_real <- cross_v$test$y
+    y_hat <- predict(regression, newdata = cross_v$train)
+    
+    error_est <-  mean((y_real-y_hat)**2)
+    errors[i] <-  error_est
+
+  }
+  return(mean(errors))
+}
+
+epe_in <- function(training,h,lambda) {
+  err <-  c()
+  x  <-   my_sample(x = NA, n = nrow(training), lambda = lambda)$x
+  for (i in 1:nrow(training)){
+    y_hat <-  my_kernel(training = training,h = h, x = x)$prediction$y
+    err  <-  append(err, (training$y - y_hat)^2)
+  }
+  return(mean(err))
+}
+
+epe_in_q <- function(training,regression,lambda) {
+  err <-  c()
+  t_data  <-   my_sample(x = NA, n = nrow(training), lambda = lambda)
+  t_data$b1 <- rep(1, nrow(t_data))
+  t_data$b3 <- t_data$x^2 
+  for (i in 1:nrow(training)){
+    y_hat <-  predict(regression, newdata = t_data)
+    err  <-  append(err, (training$y - y_hat)^2)
+  }
+  return(mean(err))
+}
+
+epe_out <- function(training,h,lambda) {
+  err <-  c()
+  for (i in 1:nrow(training)){
+    samp  <-   my_sample(x = NA, n = nrow(training), lambda = lambda)
+    y_hat <-  my_kernel(training = training,h = h, x = samp$x)$prediction$y
+    err  <-  append(err, (samp$y - y_hat)^2)
+  }
+  return(mean(err))
+}
+
+epe_out_q <- function(training,regression,lambda) {
+  err <-  c()
+
+  for (i in 1:nrow(training)){
+    t_data  <-   my_sample(x = NA, n = nrow(training), lambda = lambda)
+    t_data$b1 <- rep(1, nrow(t_data))
+    t_data$b3 <- t_data$x^2 
+    samp  <-   my_sample(x = NA, n = nrow(training), lambda = lambda)
+    y_hat <-  predict(regression, newdata = t_data)
+    err  <-  append(err, (samp$y - y_hat)^2)
+  }
+  return(mean(err))
+}
+
+```
+
+```{r,message= FALSE, echo=FALSE}
+n <- c(50,200)
+lambda <- c(1.5,5)
+h <- c(seq(0.009, 2 ,by = 0.05))
+results = as.data.frame(cbind( n = c(NA),lambda = c(NA), h = c(NA), eop = c(NA),cv_err = c(NA), epe_in = c(NA), epe_out = c(NA)))
+results_q = as.data.frame(cbind( n = c(NA),lambda = c(NA),h = c(NA), eop = c(NA),cv_err = c(NA), epe_in = c(NA), epe_out = c(NA)))
+```
+
+### Kernel Regression
+
+We used a Gaussian kernel n assuming x is 1- dimensional $K(h) = \frac{1}{\sqrt{2\pi}} e^\frac{-h^2}{2}$
+```{r,message= FALSE, echo=FALSE}
+#estimate the following quantities for the kernal regression (each loop finds a new combination of quantities for each data set that is sampled)
+for (l in lambda){
+  for (q in n){
+    for (w in h){
+      training = my_sample(n = q,lambda = l)
+      k = my_kernel(training = training, h = w, x = training$x)
+      eop_t = eop(w = k$weights,n = q,var_ep = 0.3)
+      cv_err_t = cross_val_error(training = training, h = w, n = 5)
+      epe_in_t = epe_in(training = training,h = w,lambda = l)
+      epe_out_t = epe_out(training = training,h = w,lambda = l)
+      results = rbind(results, cbind(n=q, lambda=l, h=w, eop=eop_t, cv_err=cv_err_t, epe_in=epe_in_t, epe_out=epe_out_t))
+    }
+  }
+}
+
+results <- na.omit(results)
+results = results %>% mutate("Lambda : N" = paste(as.character(lambda)," : ", as.character(n)))
+results$`Lambda : N` = as.factor(results$`Lambda : N`)
+
+#orgnizing the plots
+p1 = ggplot(results, aes(x=h, y=eop, color = `Lambda : N`)) + geom_line(size = 1)+ geom_point()+
+  labs(title="Expected Optimism",
+       x="h", y = "Error", legend.direction="")+
+  theme(legend.position="right")+ scale_color_brewer(palette="Set1")
+
+p2 = ggplot(results, aes(x=h, y=cv_err, color = `Lambda : N`)) + geom_line(size = 1)+ geom_point()+
+  labs(title="Cross Validation Error",
+       x="h", y = "Error") + scale_color_brewer(palette="Set1")
+
+p3 = ggplot(results, aes(x=h, y=epe_in, color = `Lambda : N`)) + geom_line(size = 1)+ geom_point()+
+  labs(title="In Sample Expected Error",
+       x="h", y = "Error")+ scale_color_brewer(palette="Set1")
+
+p4 = ggplot(results, aes(x=h, y=epe_out, color = `Lambda : N`)) + geom_line(size = 1)+ geom_point()+
+  labs(title="Out Of Sample Expected Prediction Error",
+       x="h", y = "Error")+ scale_color_brewer(palette="Set1")
+
+fig <- ggarrange(p1, p2, p3,p4 ,common.legend = TRUE, legend = "right")
+annotate_figure(fig,top = text_grob("Kernel Regression", face = "bold", size = 14))
+```
+
+By looking at the plots in three out of the four plots we can see there is a separation between the 2 groups of different lambdas we set (1.5,5).
+*Expected Optimism:* In the expected optimism plot we can see that all look more or less the same, in this plot we can see there is a bigger influence on the size of the data set (the smaller the data set is the larger the weight of h effects the error). we can also see that once h is over 0.5 then the error is close to 0 and when h is close to zero then we get a larger error.
+*Cross Validation Error:* We can see that the larger h is the larger the error is and that for most of the simulations we got that if the lambda is bigger the error is bigger. It seems like there is no weight to how big the data set is.
+*In Sample Expected Error:* We can see that when h is close to zero, we get that the error is almost the same for all four combinations. We can see that the larger h is the smaller the error is, and that the lambdas size has an influence on the error (the smaller lambda is the bigger the error is).
+*Out Of Sample Expected Prediction Error:*  We can see that when h is close to zero we get that the error is almost the same for all four combinations. We can see that the larger h is the larger the error is, and that the lambdas size has an influence on the error (the smaller lambda is the smaller the error is).
+
+### Quadratic Regression
+we tried to fit a quadratic model instead of the kernel regression.
+A quadratic model is: $ \hat{y} = b_1 + b_2x + b_3x^2$, we will use OLS to find our model.
+```{r,message= FALSE, echo=FALSE}
+#estimate the following quantities for the kernal regression (each loop finds a new combination of quantities for each data set that is sampled)
+
+for (l in lambda){
+  for (q in n){
+    for (w in h){
+      training_q = my_sample(n = q,lambda = l)
+      training_q$b1 <- rep(1, nrow(training_q))
+      training_q$b3 <- training_q$x^2
+      xmat <- matrix(cbind(training_q$b1,training_q$x,training_q$b3), ncol = 3)
+      regression <- lm(data = training_q, formula = y ~ x + b3)
+      eop_t_q = eop_q(x = xmat,n = q,var_ep = 0.3)
+      cv_err_t_q = cross_val_error_q(training = training_q,regression = regression , n = 5)
+      epe_in_t_q = epe_in_q(training = training_q,regression = regression,lambda = l)
+      epe_out_t_q = epe_out_q(training = training_q,regression = regression,lambda = l)
+      results_q = rbind(results_q, cbind(n=q, lambda=l,h=w, eop=eop_t_q, cv_err=cv_err_t_q, epe_in=epe_in_t_q, epe_out=epe_out_t_q))
+    }
+  }
+}
+
+results_q <- na.omit(results_q)
+results_q = results_q %>% mutate("Lambda : N" = paste(as.character(lambda)," : ", as.character(n)))
+results_q$`Lambda : N` = as.factor(results_q$`Lambda : N`)
+```
+
+```{r,message= FALSE, echo=FALSE, warning=FALSE}
+# organizing the plots
+p1_q = ggplot(results_q, aes(x=h, y=eop, color = `Lambda : N`)) + geom_line(size = 1)+ geom_point()+
+  labs(title="Expected Optimism",x="h", y = "Error", legend.direction="")+
+  theme(legend.position="right") + scale_color_brewer(palette="Set1")
+
+p2_q = ggplot(results_q, aes(x=h, y=cv_err, color = `Lambda : N`)) + geom_line(size = 1)+ geom_point()+
+  labs(title="Cross Validation Error",
+       x="h", y = "Error") + scale_color_brewer(palette="Set1")
+
+p3_q = ggplot(results_q, aes(x=h, y=epe_in, color = `Lambda : N`)) + geom_line(size = 1)+ geom_point()+
+  labs(title="In Sample Expected Error",
+       x="h", y = "Error") + scale_color_brewer(palette="Set1")
+
+p4_q = ggplot(results_q, aes(x=h, y=epe_out, color = `Lambda : N`)) + geom_line(size = 1)+ geom_point()+
+  labs(title="Out Of Sample Expected Prediction Error",
+       x="h", y = "Error") + scale_color_brewer(palette="Set1")
+
+fig_q <- ggarrange(p1_q, p2_q, p3_q,p4_q ,common.legend = TRUE, legend = "right")
+```
+
+```{r,message= FALSE, echo=FALSE, warning=FALSE}
+#display the plots
+annotate_figure(fig_q, top = text_grob("Quadratic Regression", face = "bold", size = 14))
+```
+
+By looking at the plots in three out of the four plots we can see there is a separation between the 2 groups of different lambdas we set (1.5,5).
+The ols regression is not influenced by h there for all errors we estimated they are constant with regarding the size of h.
+
+*Expected Optimism:* In the expected Optimism plot we can see that the error is constant with the size of lambda and is different depending on the size of the data set (the bigger the data set is the smaller the error is).
+
+*Cross Validation Error:* For most of the simulations we got that if the lambda is bigger the error is bigger. It seems like there is no weight to how big the data set is.
+
+*In Sample Expected Error:* For most of the simulations we got that if the lambda is bigger the error is bigger. It seems like there is no weight to how big the data set is.
+
+*Out Of Sample Expected Prediction Error:*  For all of the simulations we got that if the lambda is bigger the error is bigger. It seems like there is no weight to how big the data set is.
+
+## Q.2:
+In this question, we will analyze the data file on the Covid-19 in Israel.
+```{r, echo = FALSE}
+# First, we loaded the data and made some necessary changes to it.
+Covid.Data = readxl::read_xlsx("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/NewCases-Daily.xlsx")
+colnames(Covid.Data) = c("Date",  "New.Cases" )
+
+# Change the tupe of the date column
+Covid.Data$Date = as.Date(Covid.Data$Date, format = "%d-%m-%Y")
+```
+
+#### (1):
+
+The first plot we represent will show the number of new cases detected in Covid-19 per day in Israel, with the observed values and regression curve. 
+We will estimate the regression curve by the model of *LOESS - Local Regression* as we learned in class. We will compute the optimal span for the model in order to "smooth" the regression line and get less over-fitting.
+
+```{r, echo=FALSE}
+# Tirgul Function
+loess.gcv <- function(x, y){
+nobs <- length(y)
+xs <- sort(x, index.return = TRUE)
+x <- xs$x
+y <- y[xs$ix]
+tune.loess <- function(s){
+lo <- loess(y ~ x, span = s)
+mean((lo$fitted - y)^2) / (1 - lo$trace.hat/nobs)^2
+}
+os <- optimize(tune.loess, interval = c(.01, .99))$minimum
+lo <- loess(y ~ x, span = os)
+list(x = x, y = lo$fitted, df = lo$trace.hat, span = os)
+}
+```
+
+```{r, echo=FALSE, out.width="60%"}
+set.seed(22)
+
+# finding the optimal span
+loess_model <- loess.gcv(x = as.numeric(Covid.Data$Date), y = Covid.Data$New.Cases)
+optimal_span <- loess_model$span
+loess_optimal_span <- loess(Covid.Data$New.Cases ~ as.numeric(Covid.Data$Date), 
+                            data = Covid.Data,
+                            span = optimal_span )
+
+# predicting by this span
+pred = predict(loess_optimal_span ,newdata = Covid.Data, se=T)
+
+ggplot() +
+  geom_point(data=Covid.Data,mapping = aes(x=Date, y=New.Cases) ,color = "lightblue", size = 2)+
+  geom_line(data = Covid.Data, mapping = aes(x=Date,y= pred$fit),  color = "black")+
+  labs(title = "New Covid-19 Cases per Day",subtitle = "with LOESS curve") +
+  theme_bw()
+
+```
+
+#### (2):
+
+The second plot we will reperesent is a figure showing the daily change in rate of new detections per day. To estimate these we will use the first-derivative of the regression curve from Part 1.
+
+```{r, echo=FALSE, out.width="60%"}
+derivative <- diff(pred$fit)
+Covid.Data.der = data.frame(Date = Covid.Data$Date[2:475], derivative = derivative)
+ggplot() +
+  geom_point(Covid.Data.der, mapping = aes(x=Date, y=derivative) ,color = "purple", size = 2)+
+  #geom_line(data = Covid.Data.der, mapping = aes(x=Date,y= derivative),  color = "grey")+
+  labs(title = "The Daily Change in rate of New Detections per day",subtitle = "estimated by first derivative") +
+  theme_bw()
+
+```
+
+## Q.3:
+In this question we will fit prediction models for the response voxels (Y) in response to natural images (X).
+
+```{r, echo=FALSE}
+# First, we will load all the files - the train set and the test set. 
+
+feature_train = read.csv("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/Q3/feature_train.csv") %>% select(-X)
+train_resp = read.csv("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/Q3/train_resp.csv") %>% select(-X)
+feature_valid = read.csv("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/Q3/feature_valid.csv") %>% select(-X)
+
+```
+
+### 3.1 Prediction model
+
+It can be seen that our training data has almost 2 times more features than observations, which prevents us from using a standard OLS regression model. So we have to use one of the other models we learned.
+We debated between three models for different reasons. first, we may want to reduce the number of variables while keeping the most important ones, and for that we can use the *`Lasso Regression`* model. 
+With this method we can avoiding overweighting the parameters and attempting to reset parameters because in this dataset we have a lot of features, Because we might need to do feature selection and use only some of them.
+But, in the other hand, we might need all the features with a smaller effect (reduce the beta's) as in the *`Ridge Regression`* model, so we checked this model too.
+And finally we will check out also the *`Elastic Net`* model because it's a combination of these two models.
+In the end, we will have an optimal number of variables for the regression thus getting as simple a model as possible.
+
+First of all, we will use a data-splitting technique to estimate the success of our model, train set (70%) and test set (30%). 
+
+```{r,echo=FALSE}
+set.seed(123)
+
+#combine the train set for each response
+Voxel1.data <- cbind(feature_train, voxel = train_resp$V1)
+Voxel2.data <- cbind(feature_train, voxel = train_resp$V2)
+Voxel3.data <- cbind(feature_train, voxel = train_resp$V3)
+
+# # creating training data as 70% of the dataset for each Voxel
+data.lst = list(Voxel1.data, Voxel2.data, Voxel3.data)
+
+for (i in 1:3){
+  inds <- sample(x=1:nrow(data.lst[[i]]), size=.3*nrow(data.lst[[i]]))
+  y_ind <- dim(data.lst[[i]])[2]
+  train <- data.lst[[i]][-inds,] ; test <- data.lst[[i]][inds,]
+  train_y <- train[,y_ind] ; test_y <- test[,y_ind] 
+  train_x <- train[,-y_ind] ; test_x <- test[,-y_ind]
+  
+  # train_x = model.matrix(voxel ~ ., train)[, -1]
+  # test_x = model.matrix(voxel ~ ., test)[, -1]
+  
+  train_x = data.matrix(train_x)
+  test_x = data.matrix(test_x)
+  
+  assign(paste0("index",i,"_test"),inds)
+  assign(paste0("Voxel",i,"_train"),train)
+  assign(paste0("Voxel",i,"_test"),test)
+  assign(paste0("Voxel",i,"_train_x"),train_x)
+  assign(paste0("Voxel",i,"_train_y"),train_y)
+  assign(paste0("Voxel",i,"_test_x"),test_x)
+  assign(paste0("Voxel",i,"_test_y"),test_y)
+}
+
+
+```
+
+Now, we are going to implement Lasso, Ridge and Elastic Net on the 3 voxels on the training set and applying `Cross-Validation` so we would find the best model for each voxel.
+The best model is the one with the smallest RMSE.
+
+```{r, echo=FALSE}
+train_x.lst = list(Voxel1_train_x, Voxel2_train_x, Voxel3_train_x)
+train_y.lst = list(Voxel1_train_y, Voxel2_train_y, Voxel3_train_y)
+test_x.lst = list(Voxel1_test_x, Voxel2_test_x, Voxel3_test_x)
+test_y.lst = list(Voxel1_test_y, Voxel2_test_y, Voxel3_test_y)
+
+train_results = data.frame(voxel1 =rep(NA,7), voxel2= rep(NA,7), voxel3= rep(NA,7))
+row.names(train_results) = c("lambda.min_Lasso", "RMSE_Lasso","lambda.min_Ridge", "RMSE_Ridge", "lambda.min_ElasticNet","alpha.min_ElasticNet", "RMSE_ElasticNet")
+
+for (i in 1:3){
+  ## LASSO
+  lasso.mod_cv = cv.glmnet(x=train_x.lst[[i]], y=train_y.lst[[i]], alpha=1, standardize=TRUE)
+  lambda.min_lasso = lasso.mod_cv$lambda.min
+  pred_lasso = predict(lasso.mod_cv, s=lasso.mod_cv$lambda.min, test_x.lst[[i]])
+  RMSE_lasso = sqrt(mean((test_y.lst[[i]] - pred_lasso)^2))
+
+  ## RIDGE
+  ridge.mod_cv = cv.glmnet(x=train_x.lst[[i]], y=train_y.lst[[i]], alpha=0, standardize=TRUE)
+  lambda.min_ridge = ridge.mod_cv$lambda.min
+  pred_ridge = predict(ridge.mod_cv, s=ridge.mod_cv$lambda.min, test_x.lst[[i]])
+  RMSE_ridge = sqrt(mean((test_y.lst[[i]] - pred_ridge)^2))
+
+  ## ELASTIC NET
+  min_mse_elastic = 1000 
+  for (j in range(0,1,0.1)){
+    elastic.mod_cv = cv.glmnet(x = train_x.lst[[i]], y = train_y.lst[[i]],alpha=j, standardize=TRUE)
+    elastic_pred = predict(elastic.mod_cv, s = elastic.mod_cv$lambda.min, newx = test_x.lst[[i]])
+    RMSE_elastic = sqrt(mean((test_y.lst[[i]] - elastic_pred)^2))
+    if (RMSE_elastic < min_mse_elastic){
+      min_mse_elastic = RMSE_elastic
+      alpha_min = j
+      elastic.mod_cv_min = elastic.mod_cv
+      pred_elastic_min = elastic_pred
+      lambda.min_elastic = elastic.mod_cv$lambda.min
+    }
+}
+
+  train_results[,i] = c(lambda.min_lasso, RMSE_lasso, lambda.min_ridge,
+                        RMSE_ridge, lambda.min_elastic, alpha_min, min_mse_elastic)
+  assign(paste0("lasso.mod_cv_voxel",i),lasso.mod_cv)
+  assign(paste0("lasso.pred_voxel",i),pred_lasso)
+  assign(paste0("ridge.mod_cv_voxel",i),ridge.mod_cv)
+  assign(paste0("ridge.pred_voxel",i),pred_ridge)
+  assign(paste0("elastic.mod_cv_voxel",i),elastic.mod_cv_min)
+  assign(paste0("elastic.pred_voxel",i),pred_elastic_min)
+  }
+
+train_results=rbind(Var_Y = c(var(train_resp$V1),var(train_resp$V2),var(train_resp$V3)),train_results)
+```
+
+Let's see the results:
+
+In the next plots we can see the proccess of reducing the MSE in each model
+
+```{r, echo =FALSE, warning=FALSE, message=FALSE}
+##plot of each model with cv
+par(mfrow=c(1,3))
+plot(lasso.mod_cv_voxel1, xvar = "lambda", sub= "Lasso- voxel1")
+plot(lasso.mod_cv_voxel2, xvar = "lambda", sub= "Lasso- voxel2")
+plot(lasso.mod_cv_voxel3, xvar = "lambda", sub= "Lasso- voxel3")
+```
+
+```{r, echo =FALSE, warning=FALSE, message=FALSE}
+## plot of each model with cv
+par(mfrow=c(1,3))
+plot(ridge.mod_cv_voxel1, xvar = "lambda", sub= "Ridge- voxel1")
+plot(ridge.mod_cv_voxel2, xvar = "lambda", sub= "Ridge- voxel2")
+plot(ridge.mod_cv_voxel3, xvar = "lambda", sub= "Ridge- voxel3")
+```
+
+```{r, echo =FALSE, warning=FALSE, message=FALSE}
+## plot of each model with cv
+par(mfrow=c(1,3))
+plot(elastic.mod_cv_voxel1, xvar = "lambda", sub= "Elastic Net- voxel1")
+plot(elastic.mod_cv_voxel2, xvar = "lambda", sub= "Elastic Net- voxel2")
+plot(elastic.mod_cv_voxel3, xvar = "lambda", sub= "Elastic Net- voxel3")
+```
+
+The Cross validation results are:
+```{r, echo =FALSE}
+train_results %>%
+  kbl() %>%
+  kable_styling()
+```
+
+As we can see, at the Elastic Net model we could not find in any of the voxels a model that combines Ridge and Lasso ($\alpha$ which is between 0 to 1 but not equal to them).
+What we got is a model that is equal to Lasso ($\alpha= 1$) or Ridge ($\alpha = 0$). Therefore, the comparison is in fact only between Lasso and Ridge.
+
+In voxel 1 Ridge achieves the lowest RMSE, but in voxel 2 and 3 the Lasso model achieves the lowest one.
+among the voxels, it turns out that the smallest RMSE belongs to *Voxel 1* so it's the one for which our model works best.
+
+### 3.2 Analysis of results
+In this part we are going to use Ridge model on *Voxel 1* which has the lowest RMSE among the models.
+
+*Feature covariates:*
+
+We want to identify several important features in our model, and in order to check how important each variable is, we need a metric. As we saw while learning about Principal Component Analysis (PCA) we know that The higher the variance of the features (after scaling) the better for the model, so we will use the standard deviation of the estimator for this matter. 
+Which is: $\left\lvert {\beta} \right\rvert * SD_x$. when $\beta$ is the beta of the current variable in our model.
+
+```{r, echo =FALSE}
+small.lambda.betas <- ridge.mod_cv_voxel1$glmnet.fit$beta[, ridge.mod_cv_voxel1$lambda.min]
+features_sd = apply(feature_train, 2,sd)
+features_importance = features_sd*abs(small.lambda.betas) 
+```
+
+After finding the importance of each feature, let's see which are the 10 most important among them:
+
+```{r, echo =FALSE}
+#Ten most important features:
+most_important = head(order(features_importance,decreasing = TRUE), 10)
+
+#important features and their importance level as calculated using above metric
+kable(data.frame(Feature = most_important, Importance = as.vector(head(sort(features_importance,decreasing = TRUE), 10)) ))%>%
+  kable_styling(bootstrap_options = c("striped", "hover","condensed"),full_width = F)
+```
+
+As we can see the most important features are between 1600-1760.
+
+Now, we will look at the features and examine what they have in common:
+```{r, echo=FALSE}
+load("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/Q3/feature_pyramid.RData")
+wav_pyr_real= as.matrix(wav_pyr_real)
+wav_pyr_im= as.matrix(wav_pyr_im)
+```
+
+```{r, echo=FALSE}
+par(mfcol = c(3,4))
+for(i in 1:length(most_important)){
+  image(t(matrix(Re(wav_pyr_real[,most_important[i]]), nrow = 128)[128:1,]),col = grey.colors(100),
+        main = paste("Real Component",most_important[i]))
+}
+```
+
+We can see that all the features are in about the same area in the image - in one of the left quarters area of the image center. Also, they all deal with about the same scale - that is, not in the large and scattered quarters in the picture, but in a more limited and small resolution. In terms of orientation and direction, it can be seen that the important features are divided into two opposite groups of the white diagonal direction. So in fact some of the features are looking for a white diagonal that is tilted from the top corner to the right bottom (as feature 1752), and some are looking for such a diagonal that is tilted from the bottom corner to the right top (as 1620).
+
+It is now clearer what characterizes these features and we will proceed to the next analysis.
+
+*Linearity of response:*
+
+In this part we will check if there is a linear connection between the response and the features or the predictions.
+plotting most important feature VS response
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE,error=FALSE , out.width="60%"}
+resp_vs_best = data.frame(x=feature_train[,order(features_importance,decreasing = TRUE)[1]],
+                          y=train_resp$V1)
+
+ggplot(resp_vs_best, aes(x=x, y=y)) + 
+  geom_point()+
+  geom_smooth(method=lm)+
+    xlab("Most important feature")+ ylab("voxel_1 responses")+ ggtitle("Most important feature Vs. Voxel 1 responses") +
+  annotate("text", x = 0.75, y = -2.5, label = paste0("cor = ",round(cor(resp_vs_best$x,resp_vs_best$y),3)),colour ="blue", size = 5)
+
+
+```
+
+It seems that there is a weak linear connection between the most important feature and voxel1 and the correlation is `r round(cor(resp_vs_best$x,resp_vs_best$y),3)`.
+Now, we will examine the connection between the prediction and the responses:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE,error=FALSE , out.width="60%"}
+resp_vs_pred = data.frame(x=ridge.pred_voxel1[,1],
+                          y=train_resp$V1[index1_test])
+
+ggplot(resp_vs_pred, aes(x=x, y=y)) + 
+  geom_point()+
+  geom_smooth(method=lm)+
+  xlab("Model Predictions")+ ylab("Voxel 1 responses")+ ggtitle("Model Predictions Vs. Voxel 1 responses") +
+  annotate("text", x = 0.75, y = -2.5, label = paste0("cor = ",round(cor(resp_vs_pred$x,resp_vs_pred$y),3)),colour ="blue", size = 5)
+```
+
+As we can see, the conneaction between the predictions and the responses is also weak linear, but now we have a higher correlation - `r round(cor(resp_vs_pred$x,resp_vs_pred$y),3)`.
+
+We tried to apply some transformations on the best feature, such as log or root-square, but only the root-square displays a stronger linear relation with the reponse, as we can see in the next plot.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE,error=FALSE , out.width="60%"}
+ggplot(resp_vs_best, aes(x=sqrt(x), y=y)) + 
+  geom_point()+
+  geom_smooth(method=lm)+
+    xlab("LOG- Most important feature")+ ylab("voxel_1 responses")+ ggtitle("LOG - Most important feature Vs. Voxel 1 responses") +
+  annotate("text", x = 0.75, y = -2.5, label = paste0("cor = ",round(cor(resp_vs_best$x,resp_vs_best$y),3)),colour ="blue", size = 5)
+```
+
+And still, when we tried to apply this transformation on the features for reducing the RMSE, we actually got a higher RMSE than in the original best model.
+
+```{r,echo=FALSE}
+# ROOT
+ridge.mod_cv_ROOT = cv.glmnet(x=sqrt(Voxel1_train_x), y=Voxel1_train_y, alpha=0, standardize=TRUE)
+lambda.min_ridge_ROOT = ridge.mod_cv_ROOT$lambda.min
+pred_ridge_ROOT = predict(ridge.mod_cv_ROOT, s=ridge.mod_cv_ROOT$lambda.min, Voxel1_test_x)
+RMSE_ridge_ROOT = sqrt(mean((Voxel1_test_y - pred_ridge_ROOT)^2))
+```
+
+```{r, echo=FALSE}
+data.frame(Original_RMSE =train_results$voxel1[5], Root_trans_RMSE=RMSE_ridge_ROOT) %>%
+  kbl() %>%
+  kable_styling()
+
+```
+
+So we decided to stick with the original model.
+
+*EXTRA - The example domain:*
+
+We want to check some questions about the images. The first one will be - Which images get the highest predictions. In order to do so, we will check the best lasso model on voxel 1 (with the $\lambda$ which minimizes the RMSE), where the response got the highest prediction.
+
+The highest prediction:
+
+```{r, echo = FALSE, out.width="50%"}
+# HIGHEST
+high_pred = as.numeric(index1_test[which.max(abs(ridge.pred_voxel1))])
+load("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/Q3/train_stim_1251_1500.Rdata")
+image(t(matrix(train_stim_1251_1500[high_pred-1251,], nrow = 128)[128:1,]),col = grey.colors(100))
+```
+
+Next, we did the same to find the Lowest prediction:
+
+```{r, echo = FALSE, out.width="50%"}
+# LOWEST
+low_pred = as.numeric(index1_test[which.min(ridge.pred_voxel1)])
+load("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/Q3/train_stim_251_500.Rdata")
+image(t(matrix(train_stim_251_500[low_pred-251,], nrow = 128)[128:1,]),col = grey.colors(100))
+```
+
+As we can see, the higher prediction was for some sort of plant and the lower one was for an image of people.
+
+### 3.3 Submit predictions for the validation data on the 3 voxels
+
+In this section we created a dataframe with the predictions on the features of the validation file and also a vector with the RMSPE of the best model for each voxel.
+
+```{r, echo=FALSE}
+valid_pred_voxel1 = predict(ridge.mod_cv_voxel1 , s=ridge.mod_cv_voxel1$lambda.min, newx = data.matrix(feature_valid))
+valid_pred_voxel2 = predict(lasso.mod_cv_voxel2 , s=lasso.mod_cv_voxel2$lambda.min, newx = data.matrix(feature_valid))
+valid_pred_voxel3 = predict(lasso.mod_cv_voxel3 , s=lasso.mod_cv_voxel3$lambda.min, newx = data.matrix(feature_valid))
+
+preds = data.frame(valid_pred_voxel1, valid_pred_voxel2,valid_pred_voxel3)
+colnames(preds) = c("Prediction_Voxel_1","Prediction_Voxel_2","Prediction_Voxel_3")
+
+# creating a vector of the RMSE
+rmspes = c(train_results$voxel1[5], train_results$voxel2[3], train_results$voxel3[3])
+
+
+save(preds, file = "C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/preds.RData")
+save(rmspes, file = "C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/rmspes.RData")
+
+# load the data again
+# load("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/preds.RData")
+# load("C:/Users/Daniel Ohayon/Desktop/Studies/Year 3/52525 Statistical Learning and Data analysis/lab3/rmspes.RData")
+```
+
