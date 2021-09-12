@@ -1,0 +1,433 @@
+---
+title: "Home Exam"
+date: "20.7.21"
+output:
+  html_document:
+    theme: lumen
+    toc: yes
+    toc_float:
+      collapsed: yes
+  word_document:
+    toc: yes
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE, echo= FALSE, message= FALSE}
+knitr::opts_chunk$set(echo = FALSE,message= FALSE, warning=FALSE)
+```
+
+```{r}
+# Libraries:
+library(tidyverse)
+library(reshape2) # for melt the corr mat
+library(Hmisc) # for %not in%
+library(kableExtra)
+library(gridExtra)
+options(scipen = 999) # only full numbers
+```
+
+First, I explored the data and made some changes. I created the Y variable as `new_cases/population`, and normalized quantitative variables by the population variable and multiplied it by 100 Because the raw percentages variables are in percentages and not in decimals.
+
+I have found that the areas which their `agas_socioeconomic_index` is NA are in cities which have only one area. So I put in the city index instead of the NAs.
+```{r}
+# Loading Data
+data = read.csv("train_cases_demographics.csv", encoding = "UTF-8") %>% select(-X)
+
+# partition of the amount variables by the population
+data$town_pop_denisty = as.numeric(data$town_pop_denisty)
+data$town_diabetes_rate = as.numeric(data$town_diabetes_rate)
+data$newCases_per = (data$new_cases/data$population)*100
+
+data$pop_over20 = (data$pop_over20/data$population)*100
+data$pop_over50 = (data$pop_over50/data$population)*100
+data$pop_over70 = (data$pop_over70/data$population)*100
+data$accumulated_vaccination_first_dose = (data$accumulated_vaccination_first_dose/data$population)*100
+
+data$agas_socioeconomic_index[which(is.na(data$agas_socioeconomic_index))] = data$town_socioeconomic_index[which(is.na(data$agas_socioeconomic_index))]
+```
+
+## Q.1 - Variables that have interesting common relationship with the number of new cases.
+
+In order to identify interesting relationships with the explained variable and between the explanatory variables, I created a heatmap describing the correlations between them.
+```{r, include = FALSE}
+# Get lower triangle of the correlation matrix
+  get_lower_tri<-function(cormat){
+    cormat[upper.tri(cormat)] <- NA
+    return(cormat)
+  }
+heatmap.func = function( cormat){
+  lower_tri <- get_lower_tri(cormat)
+  melted_cormat <- melt(lower_tri, na.rm = TRUE)
+  ggplot(data = melted_cormat, aes(Var1, Var2, fill = value))+
+   geom_tile(color = "white")+
+   scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+     midpoint = 0, limit = c(-1,1), space = "Lab",
+     name="Pearson\nCorrelation") +
+    theme_bw()+
+   theme(axis.text.x = element_text(angle = 60, vjust = 1,
+      size = 8, hjust = 1))+ 
+    geom_text(aes(Var1, Var2, label = round(value, 1)), color = "black", size = 2)+
+   coord_fixed()
+}
+
+cormat <- cor(data %>% select(-c(town ,mahoz ,town_eng.y, population,new_cases)) %>% na.omit, use = "complete.obs")
+heatmap.func(cormat)
+```
+I found that the percentage of new cases is negatively correlated with **almost** all explanatory variables.
+This can be explained by the fact that most of the variables are calculated in such a way that as they rise, the city is ranked in a higher socio-economic cluster. And as we have seen in the various statistics related to the Covid-19 - the cities where the corona percentages were highest are those that contain more vulnerable and less educated and profitable populations.
+
+The variables I chose to examine is `accumulated_vaccination_first_dose` and `town_socioeconomic_index` that are very correlated with the `new cases/population` separately, and also correlative between themselves. I reduce the number of obsevations to the 300 largest areas (by population) so the scatter points can be seen better in the plot.
+
+```{r, out.width="75%", fig.align='center'}
+# 300 major areas
+data.q1 = data %>% arrange(desc(population)) %>% head (300)
+
+ggplot(data=data.q1, mapping = aes(x = accumulated_vaccination_first_dose, y = newCases_per)) + 
+  geom_point(aes(color =  town_socioeconomic_index)) +
+  scale_colour_gradientn(colours = terrain.colors(20))+
+  theme_bw()+
+  
+  # Labs
+  labs(title = "New Covid-19 Cases Vs. Vaccinated First Dose",
+       subtitle = "Dates: 24/12/20 - 07/01/21",
+       caption = "* presented as a percentages \n each observation is an agas-area \n SocioEconomic Rate: index between (-2,2)",
+       color = "SocioEconomic Rate \n(Town)") +
+  xlab("Vaccinated First Dose") +
+  ylab("New Cases / Population")+
+  
+  # Style
+  theme(plot.title = element_text(color= "black", size=13, face="bold",hjust=0.5),
+        plot.subtitle = element_text(color = "black", size = 9, hjust = 0.5 ),
+        plot.caption  = element_text(color = "black", size = 8),
+        axis.text.y = element_text(size = 8),
+        axis.title.y = element_text(hjust = 0.5, size = 9, face = "bold"),
+        axis.title.x = element_text(hjust = 0.5, size = 9, face = "bold"),
+        axis.text.x = element_text(size = 9),
+        strip.text = element_text(size=9, hjust = 0.5, face = "bold"),
+        legend.title = element_text(color="black", size=8, face= "bold",hjust=0.5),
+        legend.text = element_text(color="black", size=7, face= "bold",hjust=0.5))+
+  
+  # marking outliers
+  geom_text(aes(label = ifelse(test = accumulated_vaccination_first_dose > 40 |
+                               newCases_per >5 ,
+                               yes = paste(town), no = "")),
+            position = position_dodge(width = 0.75),
+            hjust = -.2,
+            size = 3)
+  
+```
+
+As can be seen in the plot, the higher the rate of vaccination the lower the rate of new corona cases. The more interesting relationship stems from the addition of a socioeconomic index variable to the plot.
+It can be seen that areas belonging to cities in a high socio-economic cluster are those areas where there is also a high vaccination rate and a low new case rate (shades of pink). And the higher the rate of new cases in the area, the lower the socio-economic cluster to which that city belongs (shades of green).
+This can be explained by the fact that in cities where the socio-economic situation is lower, the population lives at a higher density and it is more difficult to maintain social distance. Also, the level of education in the city is lower and therefore there is less awareness and importance to the implications of the corona and the importance of immunization.
+It is interesting to see the areas belonging to cities in the lower socio-economic clusters and also have a low immunization rate - but at the same time the rate of new cases in them is particularly low.
+It can be assumed that these are cities where corona tests do not tend to be performed so that the rate of new cases may be higher than reported. In addition, it is important to note that these are only two weeks, so there may be a decrease in those two weeks but this is not a general and sweeping trend.
+
+```{r}
+pre.data = data
+```
+
+## Q.2 - Ridge Model
+
+#### (a) - Manual function for Ridge
+As we have learned, we can write the ridge problem as:$β^{ridge} = argmin_\beta \Sigma_{i=1}^{n}(y_i-\beta_0-\Sigma_{j=1}^{p}\beta_jx_{ij})^2$  
+
+subject to: $\Sigma_{j=1}^{p}\beta_j^2 \leq t$
+
+The solution is: $\hat{\beta}^{ridge} = (X^{T}X + \lambda I)^{-1}X^{T}y$
+```{r, echo = TRUE}
+ridge <- function(train_x, train_y, lambda){
+  # input:
+    # train_x - data.frame in (n,p + 1)
+    # train_y - vector in (n)
+    # lambda - singal lambda value
+  # output
+    # beta - vector in (p + 1)
+  
+  #### the standardization is performed in the splitting to train and test
+  
+  X = train_x
+  y = train_y
+    lambda_I = diag(lambda,nrow = ncol(X), ncol = ncol(X))
+  beta = solve(t(X) %*% X + lambda_I) %*% t(X) %*% y
+ return(beta)
+}
+
+```
+
+#### (b) - Function for splitting data and running Ridge
+
+In this question, we want the two data sets to contain equal proportions from each city, in order to obtain an accurate prediction. if the city has more than 1 statistical area, then I took 70% from the observations of this city to the train, and 30% to the validation. if the city has only one statistical area then I sampled this observation randomly to one of the dataset so we will get 70% of the data in the training set and 30% in the validation set.
+
+It is important to note that the cities are logically divided between the data sets, so that there will be no significant difference between the training data and the validation and thus the model training will be more successful.
+
+```{r, echo = TRUE}
+cv_ridge <- function(x, y, lambda = NA, train_size = 0.7){
+  # input:
+    # x - data.frame in (n,p + 1)
+    # pay attention that your model should have an intersect (the + 1 dimension)
+    # y - vector in (n)
+    # lambda - grid of possible lambda values
+    # train_size - precent of that data that will use as train
+  # output
+    # best model - a list include model beta, corespond test rmse, lambda
+  
+  #### Split to train and test
+  data_cv = cbind(x,y)
+  data_cv = as.data.frame(scale(data_cv)) ## standardize the data as needed in ridge
+  
+  train <- NULL ; validation <- NULL ;sample1 = NULL
+  town_code_vec = unique(data_cv$town_code)
+  
+  for (i in town_code_vec){
+    town_data = data_cv %>% filter(town_code == i)
+    
+    if (nrow(town_data) > 1 ){
+       tr_ind = sample(1:nrow(town_data), size = train_size*nrow(town_data))
+       train = rbind(train, town_data[tr_ind,])
+       validation = rbind(validation, town_data[-tr_ind,])
+    }
+    else{
+      sample1 = rbind(sample1, town_data)
+    }
+  }
+  if (is.null(sample1) == FALSE){
+    ind_samp =sample(x=1:nrow(sample1), size=train_size*nrow(sample1))
+    train = rbind(train,sample1[ind_samp,])
+    validation = rbind(validation,sample1[-ind_samp,])
+  }
+  
+  #### keep the datasets for next questions
+  assign(value = train, x = "train", envir = parent.frame())
+  assign(value = validation, x = "validation", envir = parent.frame())
+  
+  #### add intercept
+  train_x = cbind(1, as.matrix(train %>% select(-y)))
+  validation_x = cbind(1, as.matrix(validation %>% select(-y)))
+  
+  #### find the best lambda which minimizes the RMSE 
+  lamb_rmse = NULL
+  for (lam in lambda){
+    beta = ridge(train_x = train_x, train_y = c(train$y), lambda = lam)
+    rmse = sqrt(mean((validation_x %*% beta - validation$y)^2))
+    lamb_rmse= rbind(lamb_rmse,cbind(lam ,rmse))
+  }
+  lamb_rmse = as.data.frame(lamb_rmse)
+  colnames(lamb_rmse) = c("lambda", "rmse")
+  
+  #### Answers
+  model_rmse = min(lamb_rmse$rmse)
+  model_lambda = lamb_rmse$lambda[which.min(lamb_rmse$rmse)]
+  best_model = ridge(train_x = train_x, train_y = train$y, lambda = model_lambda)
+  return(list(best_model = best_model, model_rmse = model_rmse, model_lambda = model_lambda))
+}
+
+```
+
+Now, I selected the variables relevant to linear regression and run on them the function I built.
+we need to remove the variables that are not numeric, creating dummies for the `mahoz` variable and omitting NAs.
+```{r, echo=TRUE}
+dummy_mahoz = fastDummies::dummy_cols(data$mahoz)[,c(2:8)]
+names(dummy_mahoz) = c("Ayosh", "Darom", "Merkaz", "Tzafon", "Heifa", "Jerusalem", "Tel_Aviv")
+data = data %>% cbind(dummy_mahoz) %>%
+  select(-c(town ,mahoz ,town_eng.y, population, new_cases)) %>% na.omit()
+```
+
+Next, I'll run the function with a vector of the lambdas (`seq(0.01,10,0.01)`) on our data.
+```{r, echo = TRUE}
+set.seed(150)
+ridge.model = cv_ridge(x = data %>% select(-newCases_per), 
+                       y = data$newCases_per,
+                       lambda = seq(0.01,10,0.01), train_size = 0.7)
+```
+
+
+```{r}
+answer = as.data.frame(cbind(ridge.model$model_lambda, round(ridge.model$model_rmse,3)))
+names(answer) = c("model_lambda", "model_rmse")
+answer %>% kbl(align = 'c')%>% kable_paper(full_width = F) %>% kable_styling(font_size = 15)
+```
+
+#### (3) - Residuals vector
+In this question I will analyze the residuals vector which calculated as:
+```{r, echo=TRUE}
+data.for.res = as.data.frame(scale(data))
+all.data.beta = ridge(train_x = as.matrix(cbind(1,data.for.res %>% select(-newCases_per))),
+                      train_y = as.matrix(data.for.res$newCases_per) ,
+                      lambda = ridge.model$model_lambda)
+pred_x_beta = c(as.matrix(cbind(1,data.for.res %>% select(-newCases_per))) %*% all.data.beta)
+real_y = data.for.res$newCases_per
+res_vec = pred_x_beta - real_y
+```
+Then, I tried to characterize this vector. I computed the correlation of all the variables with the residuals.
+```{r, echo=TRUE}
+data.q3 = as.data.frame(cbind(data.for.res,res_vec))
+cormat_res = cor(data.q3)[,ncol(data.q3)] 
+```
+I found that the correlation of the residuals with all the explanatory variables is very low and close to zero. In most cases there is a negative correlation, and only in a few variables it is positive but still very low.
+Then, I tried to find an interesting connection by a scatter plot of each variable Vs. the residuals, and saw that there is something in the `Agas_socioecinomic_index`variable.
+
+```{r, out.width= '60%', fig.align="center"}
+ggplot(data.q3, aes(x=abs(res_vec), y=agas_socioeconomic_index)) + geom_point(color="steelblue")+
+  labs(title = "Model Residuals Vs. Agas Socio Economic Index", subtitle = "Residuals in absolute value")+
+  xlab("abs (Residuals)")+   ylab("Agas Socio Economic Index")+  theme_bw()+
+  theme(plot.title = element_text(color= "black", size=13, face="bold",hjust=0.5),
+        plot.subtitle = element_text(color = "black", size = 9, hjust = 0.5 ))
+```
+
+It is interesting to see that the the largest residuals (in absolute value) are in the areas that their socio-economic index is very low.
+It can be assumed that when the socio-economic index is low then the other variables that more directly relate to the new number of cases do not contribute high explanatory power to the model, and it is necessary to include additional variables that affect the number of new cases in these populations.
+
+#### (4) - Linear smooth estimator
+
+In Ridge Regression the linear smooth estimator ($W$) is calculated a:
+$\hat{Y} =X\hat{\beta}^{ridge} = X(X^{T}X + \lambda I)^{-1}X^{T}y = Wy$ 
+```{r, echo = TRUE}
+# Calculate W:
+x.for.w = cbind(1, as.matrix(scale(train %>% select(-y))))
+I = diag(1,nrow = ncol(x.for.w), ncol = ncol(x.for.w))
+W = as.matrix(x.for.w %*%
+   solve(t(x.for.w) %*% x.for.w + ridge.model$model_lambda * I) %*% t(x.for.w))
+```
+
+The first statistical area in the data is area 1 in Ofakim so we take this column from the W matrix. Now, I'll find the 5 observation that affected the most on this area in the model. 
+```{r, echo = TRUE}
+Weight = round(as.numeric(head(W[,1][order(W[,1],decreasing = TRUE)],6)[2:6]),3)
+Cities_names = as.character(pre.data$town[c(7,5,6,121,114)])
+w.5 = rbind(Cities_names, Weight)
+w.5 %>% kbl()%>% kable_paper(full_width = F) %>% kable_styling(font_size = 15)
+```
+Apart from the exact same area, the three observations that most affected area 1 in Ofakim were the other three areas in Ofakim that included in the training set. The other two areas are in Kiryat-Malachi and Sderot.
+
+The areas from Ofakim are similar to the area 1 in some "technical" data such as coordinates in the location and the name of the locality but not in the other variable that are related to the corona or socio-economic condition. On the other hand, The observations from Kiryat-Malachi and Sderot are similar in the variables that are more relevant - the rate of new cases, rate of vaccinated, town_bagrut, etc.
+
+## Q.3 - Choosing the best Model
+
+In this question I tried a few models that we have learned in the course on our data.
+I used the `caret` package to train each model and examined them with Cross-Validation.
+```{r}
+library(caret)
+library(glmnet)
+
+# not scaled
+train.q3 = data[which(row.names(data) %in% row.names(train)),] %>% rename(y = newCases_per)
+validation.q3 = data[which(row.names(data) %in% row.names(validation)),] %>% rename(y = newCases_per)
+
+# scaled and as data matrix
+train_x = data.matrix(train %>% select(-y))
+validation_x = data.matrix(validation %>% select(-y))
+
+# define folds for cross validation
+trControl <- trainControl(method  = "cv", number= 10)
+```
+
+```{r}
+#### LASSO 
+set.seed(42)
+fit_LASSO = train(y~.,
+            method = 'glmnet',
+            preProc = c('center', 'scale', 'zv', 'nzv'),
+            trControl = trControl,
+            data= train, # already scaled
+            tuneGrid = expand.grid(alpha = 1, lambda = seq(0.01,10,0.01)))
+
+LASSO_pred = predict(fit_LASSO$finalModel, validation_x[,colnames(validation_x) %in% fit_LASSO$finalModel$xNames])
+LASSO_RMSE = sqrt(mean((validation$y - LASSO_pred)^2))
+```
+
+```{r}
+#### Elastic Net:
+set.seed(42)
+fit_ELASTIC = train(y~.,
+            method = 'glmnet',
+            preProc = c('center', 'scale', 'zv', 'nzv'),
+            trControl = trControl,
+            data=train,
+            tuneGrid = expand.grid(alpha = seq(0,1,0.1), lambda = seq(0.1,10,0.1)))
+
+ELASTIC_pred = predict(fit_ELASTIC$finalModel, validation_x[,colnames(validation_x) %in% fit_ELASTIC$finalModel$xNames])
+ELASTIC_RMSE = sqrt(mean((validation$y - ELASTIC_pred)^2))
+elastic_alpha = fit_ELASTIC$finalModel$a0[[1]]
+```
+
+```{r}
+#### KNN (K-Nearest Neighbors) Model:
+set.seed(42)
+fit_KNN <- train(y ~ .,
+             method     = "knn",
+             tuneGrid   = expand.grid(k = 1:100),
+             trControl  = trControl,
+             data       = train.q3)
+
+KNN_pred = predict(fit_KNN$finalModel, validation.q3 %>% select(-y))
+KNN_RMSE = sqrt(mean((validation.q3$y - KNN_pred)^2))
+```
+
+```{r}
+#### Random Forest:
+set.seed(42)
+fit_RF <- train(y ~., 
+                      data= train.q3, 
+                      method='rf', 
+                      tuneGrid= expand.grid(.mtry= sqrt(ncol(train.q3))), 
+                      trControl=trControl)
+
+RF_pred = predict(fit_RF$finalModel, validation.q3 %>% select(-y))
+RF_RMSE = sqrt(mean((validation.q3$y - RF_pred)^2))
+```
+
+```{r}
+model.rmse = data.frame(Model = c("Lasso", "Elastic Net", "KNN", "Random Forest"),
+  RMSE =round(c(LASSO_RMSE,ELASTIC_RMSE,KNN_RMSE,RF_RMSE),3))
+model.rmse  %>% kbl()%>% kable_paper(full_width = F) %>% kable_styling(font_size = 15)
+```
+
+The model with the lowest RMSE is the Random Forest model. So, I chose this model for my prediction.
+The full code of is:
+
+```{r, echo=TRUE}
+# fitting the test set 
+test = read.csv("test_features.csv", encoding = "UTF-8") %>% select(-X)
+test$town_pop_denisty = as.numeric(test$town_pop_denisty)
+test$town_diabetes_rate = as.numeric(test$town_diabetes_rate)
+
+# partition of the amount variables by the population
+test$pop_over20 = (test$pop_over20/test$population)*100
+test$pop_over50 = (test$pop_over50/test$population)*100
+test$pop_over70 = (test$pop_over70/test$population)*100
+
+# creating dummies for the Mahoz variable
+dummy_mahoz = fastDummies::dummy_cols(test$mahoz)[,c(2:7)]
+names(dummy_mahoz) = c("Ayosh", "Darom", "Merkaz", "Tzafon", "Heifa", "Tel_Aviv")
+
+# insert town_socioeconomic_index instead of NA in agas_socioeconomic_index
+test$agas_socioeconomic_index[which(is.na(test$agas_socioeconomic_index))] = test$town_socioeconomic_index[which(is.na(test$agas_socioeconomic_index))]
+
+# remove non-numeric variable
+test = test %>% cbind(dummy_mahoz) %>% select(-c(town ,mahoz ,town_eng.y, population)) %>% na.omit()
+
+# The test set doesnt have a "jerusalem" dummy so I'll remove it from the train set
+train.q3 = train.q3 %>% select(-Jerusalem) 
+```
+
+```{r, echo=TRUE}
+set.seed(42)
+# define folds for cross validation
+trControl <- trainControl(method  = "cv", number= 10)
+# Model training
+fit_RF <- train(y ~., 
+                      data= train.q3, 
+                      method='rf', 
+                      tuneGrid= expand.grid(.mtry=sqrt(ncol(train.q3))), 
+                      trControl=trControl)
+# predict
+predict_y= predict(fit_RF$finalModel,test)
+
+# RMSE from the validation set
+predict_rmse = sqrt(mean((validation.q3$y - RF_pred)^2))
+
+# save answers
+save(predict_y, predict_rmse, file = "315453027.rda")
+```
