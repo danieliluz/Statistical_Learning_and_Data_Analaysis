@@ -1,0 +1,381 @@
+---
+title: "Lab 1"
+date: "3.4.2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, echo= FALSE, message= FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+# importing libraries
+library(nycflights13)
+library(tidyverse)
+library(ggrepel)
+library(maps)
+library(ggpubr)
+library(usmap)
+library(lubridate)
+library(viridis)
+library(hrbrthemes)
+library(grid)
+library(reshape2)
+library(gridExtra)
+library(pracma)
+```
+
+
+```{r, message= FALSE, echo= FALSE}
+# importing the data:
+flights <- flights
+airports <- airports
+weather <- weather
+```
+
+## Q.1: Graph Critique
+
+### 1.1:
+
+The first graph is a map of all flights departing from Denver, Colorado in 2008 to each city in the U.S.
+The map shows lines that represent the route between Denver Airport and the other cities, the color of the lines indicates the percentage of flights on the route which had more than a 15 minutes delay.
+The answers which can be found by analyzing the graph are:
+The graph portrays which destinations in the U.S. have direct flights from Denver.
+The main question is: which destinations or areas in the U.S. have a higher tendency for flight delays, and whether the destination affects the chance that the flight will be delayed.
+
+The second graph shows a general picture of all the flights departing from the airport in 2008 (in blue) and the number of flights delayed (in red) in 2008.
+The answers the graph provides are as follows:
+The graph portrays the number of flights flown each day of the year versus the number of flights delayed for each day.
+
+We can learn from the title ("cycles”) that the graph creator is looking to find a cycle in the graph to find if there is a connection between the delayed flights versus the total number of flights flown each week.
+Another question is the effect of certain days on the number of delays and flights (can be seen in the blue dot that marks the financial crisis that year).
+In addition, according to the caption on the left, it can be seen that the creator of the graph is also trying to examine the effect of holidays on the number of flight delays.
+
+### 1.2:
+
+The first graph (the map) manages to answer the question - which cities in the U.S. have direct flights from Denver.
+Regarding the question - does the destination affect the chance that the flight will be delayed, there is no clear answer because there is no uniform trend linking the destination’s distance to the percentage of delayed flights.
+
+The second graph (the timeline) manages to answer – the comparison of the flights each day this year versus the number of flights delayed each day.
+Regarding the question of periodicity - the graph does show a relatively regular pattern every week except for the point of the financial crisis in 2008.
+On the other hand, the graph does not answer the question of the effect of the different periods of the year on the number of delayed flights.
+It is hard to tell by looking at the graph if there is an effect, it seems that there was in effect during the financial crisis which was a one-time event and not an annual event that had an extreme impact on flights. The rest of the time the pattern is relatively cyclical.
+
+### 1.3:
+
+In general, the idea in the first graph (the map) is good but there is a lot of information that does not seem to be clear: there are lines that appear under other lines and their color cannot be identified, and consequently it is difficult to deduce the ratio of delay to that destination.
+Another question that arises is the number of flights that fly to each destination and not only the percentage of delayed flights that are not shown in this graph. In addition, another question that arises and is not answered is what about international flights?  Only domestic flights appear in the graph.
+
+In the second graph (the timeline) it is not clear which airport is talked about - the information does not appear in the graph / headings. In addition, it is not clear whether there are other factors that do not appear in the graph that affect the number of delayed flights, and there is no information which leads us to an answer in the graph.  Another question that arises and is not answered is the ratio between the delayed flights and the total number of flights on the same date - only the quantities appear in the graph.
+
+### 1.4:
+
+In the first graph (the map), it is better to remove the lines from the graph. Instead of the lines, have a circle at each airport’s location where the color of the circle indicates the percentage of delayed flights and the size of the circle indicates the number of flights to the same airport.
+In this manner, we will solve the problem of the lines that are hidden below other lines, and we will also be able to examine which destinations have more flights from Denver. We would also add the destinations that are cut out of the current map and add the names of the cities.
+
+In the second graph (the timeline), it is better to change the red lines to a continuous line like the blue line, and add the name of the airport to the title.
+
+
+## Q.2: Reproducing graphic analyses
+
+The first plot - A graphic summarizing the flight volume and flights delayed, broken by day and showing weekly cycles.
+
+```{r, message= FALSE, warning=FALSE,results = FALSE, fig.width = 12, fig.height=4, echo= FALSE}
+
+# Adding new column of the union date
+weekly_flights <- flights %>% mutate(date = make_date(year, month, day))
+
+# new dataframe for the red line- delayed flights (more than 15 minutes) groupby dates
+delay_flights <-  weekly_flights %>%
+  mutate(count_15 = ifelse(dep_delay >15, 1,0)) %>%
+  group_by(date) %>%
+  summarise(del_flights = sum(count_15, na.rm = TRUE), .groups = 'drop')
+
+# new dataframe for the blue line- total flights groupby dates
+total_flights <-  weekly_flights %>%
+  group_by(date) %>% 
+  summarise(n_flights = n(), .groups = 'drop')
+
+# Adjusting the date scale to the US
+invisible(Sys.setlocale(category = "LC_ALL", locale = "english")) 
+
+plot.weekly <- ggplot(delay_flights, aes(x=date, y=del_flights)) +
+  geom_point(color= "red", size = 0.5) + 
+  geom_segment(aes(x=date, xend=date, y=0, yend=del_flights), color = "red", size =0.05) +
+  geom_line(total_flights, mapping =aes(x=date, y=n_flights ), color="blue", size =0.1)+
+  geom_point(total_flights, mapping =aes(x=date, y=n_flights), color= "blue", size = 0.3) +
+  # theme
+    theme(panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank())+  theme_bw()+
+  # titles
+  labs(title = "TEMPORAL EFFECTS",subtitle = "WEEKLY CYCLES") +
+  theme(plot.title = element_text(color="deepskyblue4", size=20, face="bold",hjust=0.5),
+                  plot.subtitle = element_text(color = "black", size = 13, face = "bold", hjust = 0.5),
+        plot.caption  = element_text(color = "black", size = 8, face = "bold"),
+        plot.caption.position =  "plot")+
+  # X - axis
+  scale_x_date(date_breaks = "months" , date_labels = paste("01","%b-%Y", sep = ""),
+               limits = as.Date(c('2013-01-01','2013-12-31'))) +
+    theme(axis.text.x =  element_text(size = rel(1), angle = 00, colour = "azure4"),
+          axis.title.x=element_blank()) +
+  
+  # Y- axis
+  labs(y=paste("Flights\n Per Day"),x=element_blank()) +
+  theme(axis.title.y = element_text(colour = "azure4", angle=0,size = 10), axis.text.y =  element_text(size = rel(1), angle = 00, colour = "azure4"))+
+  
+  # bold points
+  annotate("point", x = total_flights$date[which(total_flights$n_flights == min(total_flights$n_flights))],
+           y =  min(total_flights$n_flights), colour = "deepskyblue4",size = 5)+
+  # shrink the plot
+
+# adding unreal points for the legend
+geom_point(total_flights, mapping = aes(x = date, y = rep(-1000, length(date)), colour = "red")) +
+geom_point(total_flights, mapping = aes(x = date, y = rep(-1000, length(date)), colour = "blue")) +
+ylim(c(0, 1050)) +
+
+# legends
+theme(legend.position = "top", legend.box = "vertical", legend.text = element_text(color = "black", size = 10))+
+scale_color_manual(name ="" ,values=c("blue", "red"),
+labels = c("All Flights (scheduled for departure)",
+"Late Flights (departure delayed > 15 minutes\n(Year = 2013)"))
+
+# adding the caption of the left side
+plot.left.caption <- textGrob("WEEKLY CYCLES\nFEW FLYGHTS: SUNDAYS AND SATURDAYS\nMOST FLIGHTS: MONDAYS, THURSDAYS,\nAND FRIDAYS \n \nFEWER FLIGHT ON STORMS", gp = gpar(fontface = 0, fontsize = 8),
+    hjust = 0, x=0.3)
+
+# merge the 2 parts
+grid.arrange(plot.weekly, left = plot.left.caption)
+```
+
+
+
+
+The second plot - A graphic summarizing the percent of flights delayed, broken by destination Airport.
+
+```{r, message= FALSE, warning=FALSE, fig.width = 10, fig.height=7, echo= FALSE, fig.align='center'}
+
+#merge the data frame of the flights with the dataframe of the airports
+flights_map <- merge(flights,airports, by.x = "dest", by.y = "faa", all.x=TRUE)
+
+# filter by one origin - "JFK" 
+flights_map <-flights_map %>% filter (origin == "JFK") %>%
+  #count the big delayed flights
+  mutate(count_15 = ifelse(dep_delay >15, 1,0))
+
+# group by destination and calculate the percentage
+flights_map <- flights_map %>% group_by(dest) %>% mutate(count_delay = sum(count_15,na.rm = TRUE), count_flights = n(),
+                      per_delay = (count_delay/count_flights)*100,
+                      
+                      #adding columns that will ude at the legend of the plot
+                      category = case_when(per_delay <10 ~ "< 10%",
+                                           per_delay >= 10 & per_delay<15 ~ "10%-15%",
+                                           per_delay >= 15 & per_delay <20 ~ "15%-20%",
+                                           per_delay >=20 & per_delay < 25 ~ "20%-25%",
+                                           per_delay >=25 ~ ">25%"),
+                      color = case_when(per_delay <10 ~ "green",
+                                        per_delay >= 10 & per_delay<15 ~ "purple",
+                                        per_delay >= 15 & per_delay <20 ~ "blue",
+                                        per_delay >=20 & per_delay < 25 ~ "orange",
+                                       per_delay >=25 ~ "red"))
+
+# keep the relevant columns
+flights_map <-  flights_map %>%
+  select(origin, dest,lat,lon, per_delay, category, color) %>%
+  arrange(desc(origin)) %>% distinct()
+
+# import the state labels
+us_map<- usmap::us_map()
+data(state)
+
+# saving the coordinates of  JFK
+jfk_cord <- c(airports$lat[which(airports$faa == 'JFK')],airports$lon[which(airports$faa == 'JFK')])     
+# create the vector for the legend
+flights_map$category <- factor(flights_map$category, levels = c("< 10%", "10%-15%", "15%-20%", '20%-25%', ">25%"))  
+
+ggplot(data = flights_map) +
+  # use the states map data
+  geom_polygon(data = map_data("state"), aes(x = long, y = lat, group = group),
+  fill="white", colour = "darkgrey") +
+  annotate("text", x=state.center$x, y= state.center$y, label= state.abb, color="darkgrey")+
+  # drawing the points of the destinations
+  geom_point(aes(x=lon, y=lat), shape = "o", size = 2.5,color = flights_map$color) +
+  # theme and size
+  theme_void() +xlim(-125, -65) + ylim(25, 50) +
+  # drawing the lines
+  geom_segment(data = flights_map, aes(x=jfk_cord[2], y=jfk_cord[1], xend=lon, yend=lat,color=category), size=1) +
+  # adding legend
+  scale_color_manual(name = "" ,
+           values=c('< 10%' = "green", "10%-15%" = "purple",  "15%-20%" = "blue", "20%-25%" = "orange", ">25%" = "red"), 
+           labels = c("< 10%", "10%-15%", "15%-20%", '20%-25%', ">25%")) +
+  # titles and text design
+  ggtitle("% of Flight Departures Delayed > 15 Min\n",
+  subtitle = "Airport = JFK    Year = 2013") + #Title and subtitle
+  theme(plot.title = element_text(color="black", size=15, face="bold",hjust=0.5),
+        plot.subtitle = element_text(color = "black", size = 10 , face = "bold", hjust = 0.5),
+        legend.text = element_text(size = 10, colour = "gray30"),
+        legend.spacing = unit(0, "pt"), legend.direction = "vertical", legend.box = "horizontal",
+        legend.position = c(0.025,0.4), legend.justification = c(0, 1))
+```
+
+
+## Q.3 - Freestyle analysis
+
+In this question we were asked to analyze one or two "stories" from the data which we found interesting.
+
+First, we were interested in examining the relationship between airlines (column "Carrier") and delayed flights -
+which companies hade more delays and which hade less delays.
+
+In order to analyze the data in a more general "zoom", we grouped the observations in each company by months and not by flights. So, in fact each observation represents the percentage of the delayed flights in each company per month.
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+air_companies <- flights %>%
+  #adding a binary cloumn for delayed flights
+  mutate(delay = ifelse(dep_delay >0, 1,0)) %>% 
+  
+  #sum delayed flights and total flights by group and then summarize the ratio between them
+  group_by(carrier, month) %>%
+  mutate(del_flights = sum(delay, na.rm = TRUE), n_flights = n()) %>%
+  # remove all the carriers that average less than 1 flight a day 
+  filter ((carrier != c("OO"))) %>% filter ((carrier != c("HA"))) %>%
+  summarise(del_fl = (del_flights/n_flights)*100, .groups = 'drop') %>%
+  # remove duplicate rows
+  distinct() 
+```
+
+The graph that we think is best suited to present the findings is a BOXPLOT because we can see in it some important metrics such as median and percentages. We have added to the plot points indicating the different observations. (As mentioned, each point indicates a month).
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE, fig.align='center'}
+
+air_companies %>% ggplot(aes(x=fct_reorder(carrier,del_fl), y=del_fl, group= carrier)) + 
+    geom_boxplot(fill="aquamarine4", alpha=0.2, notch=FALSE) + 
+    stat_boxplot(geom='errorbar')+
+  
+  # adding observations points
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.6,fill="pink")+
+    theme_bw() +
+  
+  # The titles and their style 
+  labs(title = "Companies Distribution of Delays",
+       subtitle =  "Weighted for each Company per Month",
+       caption = "*Each point is an observation of a month") + 
+       xlab("Company") + ylab("% delayed flights of each Company") +
+    theme(plot.title = element_text(color="black", size=13, face= "bold",hjust=0.5),
+        plot.subtitle = element_text(color = "black", size = 9 , hjust = 0.5),
+        plot.caption  = element_text(color = "black", size = 8,face = "italic", hjust = 1, vjust = 1),
+        axis.text.y = element_text(size = 8),
+        axis.title.y = element_text(hjust = 0.5, size = 9, face = "bold"),
+        axis.title.x = element_text(hjust = 0.5, size = 9, face = "bold"),
+        axis.text.x = element_text(size = 9),
+        strip.text = element_text(size=8, hjust = 0.5, face = "bold")) 
+```
+
+We can see in the graph that there are differences in the percentage of delayed flights per month between the different airlines, in most companies the distribution ranges from 25% to 75%.
+
+If you examine the company "US" which has the smallest percentage of delays. We looked in to the company "US" and found out that the company flies flights by the hour (have a flight every hour to each destination), therefore any delay in a flight will harm the rest of their schedule and that may place greater emphasis on reducing delays.
+
+In addition, in 2013 the company was the largest domestic flight company in the U.S. and therefore had more experience that help them decrease the percentage of delays. At the beginning of 2013 the company decided to merge with another large airline, the merger took place in December 2013, that motivated the heads of the company in 2013 to show that they were worthy of a merger and reduce the percentage of delays.
+
+In conclusion, in our opinion, we were able to present in this graph a general comparison between the airlines, regarding the percentage of delayed flights.
+
+
+
+Now, we wanted to also use the weather data that we have not used so far, and examine the relationship between this data and the delayed flights.
+Therefore, we merged the two data frames and extracted the percentage of delayed flights, this time according to the temperature that was at that origin airport(column "temp" in the "weather" dataframe) and the origin.
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE}
+weather_df.plot <- flights %>%  merge(weather, all.x=TRUE)      # Merge the dateframes
+
+temp.delay.plot <- weather_df.plot %>%
+  # adding a binary cloumn for delayed flights
+  mutate(delay = ifelse(dep_delay >0, 1,0)) %>% 
+  # sum delayed flights and total flights by group and then summarize the ratio between them
+  group_by(temp, origin) %>% 
+  mutate(del_fl = sum(delay, na.rm = TRUE), n_flights = n()) %>%
+  summarise(del_fl = (del_fl/n_flights)*100, mean = mean(n_flights) ,.groups = 'drop') %>%
+  # remove duplicate rows
+  distinct()
+```
+
+Both the temperature and the percentages are continuous variables so we chose to use a scatterplot to contain all the observations according to the data. In addition, we added another layer to the graph by coloring the dots according to the origin airport.
+We also added a trend to examine the relationship between the variables (linear or not).
+
+```{r, message= FALSE, warning=FALSE, echo= FALSE, fig.align='center'}
+
+ggplot(temp.delay.plot, aes(x=temp, y=del_fl)) + 
+geom_point(mapping = aes(color=origin, size = mean)) +
+ # points design
+ scale_size_area(max_size=4)+
+ scale_colour_manual(values = c("coral1", "dodgerblue", "seagreen2")) +
+ # Adding trend line
+ stat_smooth(color="black")+
+ theme_bw() +
+ # The titles and their style 
+  labs(title = "Percentage of delayed flights in each Temperature",
+     subtitle =  "Group by each Origin",
+     caption = "*Each observation is the percentage of delayed flights\n at a particular destination at a particular temperature") + 
+  xlab("temperature in the origin")+ ylab("% delayed flights in each temperature and origin")+
+  theme(legend.title = element_text(color="black", size=8, face= "bold",hjust=0.5),
+        legend.text = element_text(color="black", size=7, face= "bold",hjust=0.5),
+        plot.title = element_text(color="black", size=13, face= "bold",hjust=0.5),
+      plot.subtitle = element_text(color = "black", size = 10 , face = "bold", hjust = 0.5),
+      plot.caption  = element_text(color = "black", size = 8,face = "italic", hjust = 1, vjust = 1),
+      axis.text.y = element_text(size = 8),
+      axis.title.y = element_text(hjust = 0.5, size = 9, face = "bold"),
+      axis.title.x = element_text(hjust = 0.5, size = 9, face = "bold"),
+      axis.text.x = element_text(size = 9), strip.text = element_text(size=9, hjust = 0.5, face = "bold"))  
+
+```
+
+We can see in the graph that in extreme temperatures the percentage of delays has a greater variance, in the hotter temperatures (over 60 degrees) there is an increase in the percentage of delays even though the number of flights remains almost the same and when reaching extreme temperature (over 90 degrees) the number of flights is smaller but still the percentage of delays increases.
+
+Therefore, it can be assumed that hot temperature has an effect on the percentage of flights delayed. However, in cold temperatures (below 25 degrees) you can see a moderate increase with high variance. although the number of flights is relatively low, this indicates instability and it is not always possible to know whether the flight can will take off or not, that can cause large delays on some flights which will affect the graph because there are relatively low number of flights.
+
+Looking at the colors of the points (colored by airport) it can be seen that flights from “EWR” had more delays compared to the other two airports and most of their points are above the trend line.
+
+
+## Q.4 - Graphical Lineup
+
+```{r,message = FALSE, echo= FALSE, fig.align='center'}
+
+flights_by_month <- flights
+flights_by_month <- flights_by_month %>% filter (origin == "JFK") %>% mutate(count_15 = ifelse(dep_delay >15, 1,0))
+flights_by_month <- flights_by_month %>% group_by(month) %>% mutate(count_delay = sum(count_15,na.rm = TRUE), count_flights = n(),per_delay = (count_delay/count_flights)*100) %>% select(month,per_delay) %>% distinct() %>% arrange(month)
+
+# min and max dellays 
+min_month <- min(flights_by_month$per_delay)
+max_month <- max(flights_by_month$per_delay)
+#set the seed so we will get the same resulate when we run it again
+set.seed(123)
+#place mark to incert the real plot
+rand_num <- sample(1:19, 1)
+rand_data <- as.data.frame(matrix(randperm(seq(min_month,max_month,by = 0.01),12*rand_num), nrow=12))
+rand_data <- cbind(rand_data,flights_by_month$per_delay)
+rand_data <- cbind(rand_data,as.data.frame(matrix(randperm(seq(min_month,max_month,by = 0.01),(19-rand_num)*12), nrow=12)))
+rand_data <- rand_data %>% `colnames<-`(c(1:20))
+rand_data <- melt(rand_data)
+rand_data$month <- rep(1:12,20)
+
+ggplot(data=rand_data, aes(x=factor(month), y=value)) + 
+  geom_bar(stat="identity", fill="blue") +  
+  facet_wrap(~ variable) + 
+  labs(title = "Graphical Lineup", subtitle = "% of Departures Delays - Simulated", x ='Month',y="% of Departures Delays") +theme(plot.title = element_text(color="black", size=10, face= "bold",hjust=0.5),
+        plot.subtitle = element_text(color = "black", size = 7 , face = "bold", hjust = 0.5), axis.text.y = element_text(size = 7),axis.text.x = element_text(size = 7))
+```
+
+According to the article written by Wickham in 2010 there are two methods we can use to learn whether to accept or reject our null hypothesis.
+The goal is to look at a number of random graphs which generate random numbers with permutation test. Among the random graphs there is one graph that contains the real data.
+
+By testing if we can identify the real graph or not, we can learn whether to accept or reject our null hypothesis.
+Our null hypothesis is: there is a relationship between the percentage of delayed flights and the month in which the flights flew.
+
+The article said that the average person can distinguish between 20 graphs so we created 19 random graphs so that each graph is divided into 12 months. Each month received a percentage of delayed flights, between the minimum percentage and the maximum percentage of delayed flights in the real data. We buried the real graph between the random graphs.
+
+After looking at all the graphs we tried to find out if the real graph can be identified, and if there is a graph that has data that does not look random.
+After looking at the graphs it is very difficult to know which graph is the graph from the real data, so the null hypothesis cannot be rejected.  Just because the null hypothesis cannot be rejected does not mean that there is or there isn't a connection between the months of the year and the percentage of delayed flights.
+
+If you look at the real graph (graph 16) you can see that there may be a trend and a connection.  There is a peak in the number of flights delayed in July (holiday season) and a decrease in September, October, and  November which can be explained by the number of flights in these months.
+
+
